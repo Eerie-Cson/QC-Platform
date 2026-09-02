@@ -1,6 +1,37 @@
+// hooks/useSessions.ts
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { SessionRow, Ratings } from "../types";
 import { isRatingEmpty, isRatingComplete } from "../utils";
+
+export type FilterState = {
+  lighting: string;
+  sharpness: string;
+  handVisibility: string;
+  fovFraming: string;
+  cameraAngle: string;
+  idle: string;
+  seated: string;
+  environment: string;
+  other: string;
+  systemRating: string;
+  reviewStatus: string;
+  taskSearch: string;
+};
+
+const initialFilters: FilterState = {
+  lighting: "All",
+  sharpness: "All",
+  handVisibility: "All",
+  fovFraming: "All",
+  cameraAngle: "All",
+  idle: "All",
+  seated: "All",
+  environment: "All",
+  other: "All",
+  systemRating: "All",
+  reviewStatus: "All",
+  taskSearch: "",
+};
 
 interface UseSessionsOptions {
   endpoint: string;
@@ -17,6 +48,8 @@ export function useSessions({
   const [ratings, setRatings] = useState<Record<string, Ratings>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [filters, setFilters] = useState<FilterState>(initialFilters);
 
   const fetchSessions = useCallback(async () => {
     setLoading(true);
@@ -44,6 +77,71 @@ export function useSessions({
     fetchSessions();
   }, [fetchSessions]);
 
+  // ---------- Filtered rows with special handling for systemRating "None" ----------
+  const filteredRows = useMemo(() => {
+    return rows.filter((row) => {
+      const rating = ratings[row.sessionId] || {};
+      const match = (filterVal: string, actualVal: string | undefined) =>
+        filterVal === "All" || actualVal === filterVal;
+
+      // System rating logic (unchanged)
+      let systemMatch = true;
+      if (filters.systemRating === "All") {
+        systemMatch = true;
+      } else if (filters.systemRating === "None") {
+        systemMatch = row.systemRating === "";
+      } else {
+        systemMatch = row.systemRating === filters.systemRating;
+      }
+
+      // Review status logic
+      let statusMatch = true;
+      const isEmpty = isRatingEmpty(rating);
+      const isComplete = isRatingComplete(rating);
+      if (filters.reviewStatus === "Rated") {
+        statusMatch = isComplete;
+      } else if (filters.reviewStatus === "In progress") {
+        statusMatch = !isEmpty && !isComplete;
+      } else if (filters.reviewStatus === "Pending") {
+        statusMatch = isEmpty;
+      } // "All" -> statusMatch stays true
+
+      // Task name search — case-insensitive substring match
+      const taskMatch =
+        filters.taskSearch.trim() === "" ||
+        row.task
+          .toLowerCase()
+          .includes(filters.taskSearch.trim().toLowerCase());
+
+      return (
+        match(filters.lighting, rating.lighting) &&
+        match(filters.sharpness, rating.sharpness) &&
+        match(filters.handVisibility, rating.handVisibility) &&
+        match(filters.fovFraming, rating.fovFraming) &&
+        match(filters.cameraAngle, rating.cameraAngle) &&
+        match(filters.idle, rating.idle) &&
+        match(filters.seated, rating.seated) &&
+        match(filters.environment, rating.environment) &&
+        match(filters.other, rating.other) &&
+        systemMatch &&
+        statusMatch &&
+        taskMatch
+      );
+    });
+  }, [rows, ratings, filters]);
+
+  const hasActiveFilters = useMemo(
+    () =>
+      filters.taskSearch.trim() !== "" ||
+      Object.entries(filters).some(
+        ([key, v]) => key !== "taskSearch" && v !== "All",
+      ),
+    [filters],
+  );
+
+  const clearFilters = useCallback(() => setFilters(initialFilters), []);
+
+  // ---------- submitRating and exportCSV (unchanged) ----------
   const submitRating = useCallback(
     async (
       sessionId: string,
@@ -70,7 +168,6 @@ export function useSessions({
         const data = await res.json();
         const updatedSession = data.session;
 
-        // Update ratings state
         setRatings((prev) => {
           const newRatings = { ...prev };
           if (isEmpty) delete newRatings[sessionId];
@@ -78,7 +175,6 @@ export function useSessions({
           return newRatings;
         });
 
-        // Update rows state with the server response (ensures systemRating is correct)
         if (updatedSession) {
           setRows((prevRows) =>
             prevRows.map((row) =>
@@ -129,10 +225,15 @@ export function useSessions({
 
   return {
     rows,
+    filteredRows,
     ratings,
     loading,
     error,
     reviewedCount,
+    filters,
+    setFilters,
+    clearFilters,
+    hasActiveFilters,
     submitRating,
     exportCSV,
     refetch: fetchSessions,

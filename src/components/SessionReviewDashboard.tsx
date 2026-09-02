@@ -1,4 +1,3 @@
-// components/SessionReviewDashboard.tsx
 import { useState } from "react";
 import {
   Download,
@@ -16,15 +15,26 @@ import { useToast } from "../hooks/useToast";
 import { useHoverSummary } from "../hooks/useHoverSummary";
 import { RatingSummaryCard } from "./RatingSummaryCard";
 import { RatingModal } from "./RatingModal";
+import { SessionFilters } from "./SessionFilters";
+import { TaskSearchInput } from "./TaskSearchInput";
 
 export function SessionReviewDashboard() {
-  const { rows, ratings, reviewedCount, submitRating, exportCSV } = useSessions(
-    {
-      endpoint: "/api/sessions",
-      ratingsEndpoint: "/api/ratings",
-      exportEndpoint: "/api/export-csv",
-    },
-  );
+  const {
+    filteredRows,
+    rows,
+    ratings,
+    reviewedCount,
+    submitRating,
+    exportCSV,
+    filters,
+    setFilters,
+    clearFilters,
+    hasActiveFilters,
+  } = useSessions({
+    endpoint: "/api/sessions",
+    ratingsEndpoint: "/api/ratings",
+    exportEndpoint: "/api/export-csv",
+  });
 
   const { toast, showToast } = useToast();
   const { hoveredRowId, hoverRect, handleRowEnter, handleRowLeave } =
@@ -34,7 +44,6 @@ export function SessionReviewDashboard() {
   >(null);
   const [reviewingRowId, setReviewingRowId] = useState<string | null>(null);
 
-  // Shared handler for opening the session link – highlights the row
   const handleOpenLink = (sessionId: string) => {
     setReviewingRowId(sessionId);
   };
@@ -102,15 +111,32 @@ export function SessionReviewDashboard() {
                 </span>{" "}
                 of {rows.length} reviewed
               </p>
+              {hasActiveFilters && (
+                <span className="text-sm text-blue-600">
+                  ({filteredRows.length} shown)
+                </span>
+              )}
             </div>
           </div>
-          <button
-            onClick={handleDownload}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 active:bg-slate-950 transition-colors self-start sm:self-auto shadow-sm"
-          >
-            <Download size={16} />
-            Export sessions CSV
-          </button>
+
+          {/* Header actions: Task search + Filter toggle + Export button */}
+          <div className="flex items-center gap-2 relative self-start sm:self-auto">
+            <TaskSearchInput filters={filters} setFilters={setFilters} />
+            <SessionFilters
+              filters={filters}
+              setFilters={setFilters}
+              clearFilters={clearFilters}
+              hasActiveFilters={hasActiveFilters}
+            />
+            <button
+              onClick={handleDownload}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 active:bg-slate-950 transition-colors shadow-sm"
+            >
+              <Download size={16} />
+              <span className="hidden lg:inline">Export QC CSV</span>
+              <span className="lg:hidden">Export</span>
+            </button>
+          </div>
         </div>
 
         {/* Table (desktop) */}
@@ -129,7 +155,7 @@ export function SessionReviewDashboard() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, i) => {
+              {filteredRows.map((row, i) => {
                 const rating = ratings[row.sessionId];
                 const done = isRatingComplete(rating);
                 const hasRating =
@@ -205,8 +231,8 @@ export function SessionReviewDashboard() {
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={() => handleOpenLink(row.sessionId)}
-                          onAuxClick={() => handleOpenLink(row.sessionId)} // middle‑click
-                          onContextMenu={() => handleOpenLink(row.sessionId)} // right‑click (before menu)
+                          onAuxClick={() => handleOpenLink(row.sessionId)}
+                          onContextMenu={() => handleOpenLink(row.sessionId)}
                           title="Open session"
                           className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 transition-colors"
                         >
@@ -231,13 +257,23 @@ export function SessionReviewDashboard() {
                   </tr>
                 );
               })}
+              {filteredRows.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="py-12 text-center text-slate-400 text-sm"
+                  >
+                    No sessions match the current filters.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
 
         {/* Mobile cards */}
         <div className="lg:hidden space-y-3">
-          {rows.map((row) => {
+          {filteredRows.map((row) => {
             const rating = ratings[row.sessionId];
             const done = isRatingComplete(rating);
             const hasRating = rating !== undefined && !isRatingEmpty(rating);
@@ -348,6 +384,11 @@ export function SessionReviewDashboard() {
               </div>
             );
           })}
+          {filteredRows.length === 0 && (
+            <div className="py-12 text-center text-slate-400 text-sm">
+              No sessions match the current filters.
+            </div>
+          )}
         </div>
       </div>
 

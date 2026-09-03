@@ -77,14 +77,15 @@ export function useSessions({
     fetchSessions();
   }, [fetchSessions]);
 
-  // ---------- Filtered rows with special handling for systemRating "None" ----------
+  // ---------- Filtered rows ----------
   const filteredRows = useMemo(() => {
+    const searchTerm = filters.taskSearch.trim().toLowerCase();
     return rows.filter((row) => {
       const rating = ratings[row.sessionId] || {};
       const match = (filterVal: string, actualVal: string | undefined) =>
         filterVal === "All" || actualVal === filterVal;
 
-      // System rating logic (unchanged)
+      // System rating logic
       let systemMatch = true;
       if (filters.systemRating === "All") {
         systemMatch = true;
@@ -104,14 +105,13 @@ export function useSessions({
         statusMatch = !isEmpty && !isComplete;
       } else if (filters.reviewStatus === "Pending") {
         statusMatch = isEmpty;
-      } // "All" -> statusMatch stays true
+      }
 
-      // Task name search — case-insensitive substring match
+      // Search by task name OR email – case-insensitive
       const taskMatch =
-        filters.taskSearch.trim() === "" ||
-        row.task
-          .toLowerCase()
-          .includes(filters.taskSearch.trim().toLowerCase());
+        searchTerm === "" ||
+        row.task.toLowerCase().includes(searchTerm) ||
+        row.email.toLowerCase().includes(searchTerm);
 
       return (
         match(filters.lighting, rating.lighting) &&

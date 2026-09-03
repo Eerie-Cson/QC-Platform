@@ -29,8 +29,8 @@ export function TaskSearchInput({ filters, setFilters }: TaskSearchInputProps) {
         type="text"
         value={value}
         onChange={handleChange}
-        placeholder="Search task..."
-        aria-label="Search by task name"
+        placeholder="Search task or email..." // 👈 updated
+        aria-label="Search by task or email"
         className={`w-full sm:w-56 rounded-lg border py-2.5 pl-9 text-sm transition-colors focus:outline-none focus:ring-2 ${
           value
             ? "border-blue-300 bg-blue-50 text-blue-700 font-medium pr-8 focus:ring-blue-600/15"
@@ -42,7 +42,7 @@ export function TaskSearchInput({ filters, setFilters }: TaskSearchInputProps) {
         <button
           type="button"
           onClick={handleClear}
-          aria-label="Clear task search"
+          aria-label="Clear search"
           className="absolute right-2.5 top-1/2 -translate-y-1/2 text-blue-400 hover:text-blue-700 transition-colors"
         >
           <X size={14} />

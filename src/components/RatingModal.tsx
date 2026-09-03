@@ -7,6 +7,7 @@ import {
   EyeOff,
   AlertTriangle,
   Check,
+  CheckCheck,
   Edit3,
   RotateCcw,
 } from "lucide-react";
@@ -302,6 +303,31 @@ export function RatingModal({
     });
   };
 
+  // Quick action: set every quality field (except System rating) to its
+  // "no issue" / green state in one click.
+  const handleSetAllNoIssue = () => {
+    setRating((prev) => {
+      const newRating: Ratings = { ...prev, slowLoading: false };
+
+      SEVERITY_FIELDS.forEach((f) => {
+        newRating[f.key] = Severity.NoIssue;
+      });
+      newRating.seated = Seated.StandingMoving;
+      newRating.environment = Environment.CorrectTask;
+      newRating.other = Severity.NoIssue;
+
+      if (!commentManuallyEdited) {
+        newRating.comment = generateComment(
+          newRating,
+          faceVisible,
+          isOrientationConfirmed,
+        );
+      }
+
+      return newRating;
+    });
+  };
+
   const complete = isRatingComplete(rating);
 
   useEffect(() => {
@@ -462,12 +488,23 @@ export function RatingModal({
           {!isCrosscheck && (
             <>
               <div>
-                <p
-                  className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-2"
-                  style={{ fontFamily: FONT_UI }}
-                >
-                  Video quality
-                </p>
+                <div className="flex items-center justify-between mb-2">
+                  <p
+                    className="text-[10px] font-semibold uppercase tracking-wider text-slate-400"
+                    style={{ fontFamily: FONT_UI }}
+                  >
+                    Video quality
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleSetAllNoIssue}
+                    title="Set Lighting, Sharpness, Hand Visibility, FOV Framing, Camera Angle, Idle, Seated, Environment and Other to No issue"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-full transition-colors cursor-pointer"
+                  >
+                    <CheckCheck size={13} />
+                    Mark all no issue
+                  </button>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
                   {SEVERITY_FIELDS.map((f) => (
                     <SegmentedField<Severity>

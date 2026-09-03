@@ -25,8 +25,10 @@ import { formatTimestamp, isRatingEmpty } from "../utils";
 import { useSessions } from "../hooks/useSessions";
 import { useToast } from "../hooks/useToast";
 import { useHoverSummary } from "../hooks/useHoverSummary";
+import { useReviewingSession } from "../hooks/useReviewingSession";
 import { RatingSummaryCard } from "./RatingSummaryCard";
 import { RatingModal } from "./RatingModal";
+import { SessionLink } from "./SessionLink";
 
 export function CrosscheckDashboard() {
   const { rows, ratings, submitRating, exportCSV } = useSessions({
@@ -39,7 +41,8 @@ export function CrosscheckDashboard() {
   const { hoveredRowId, hoverRect, handleRowEnter, handleRowLeave } =
     useHoverSummary();
   const [activeRow, setActiveRow] = useState<SessionRow | null>(null);
-  const [reviewingRowId, setReviewingRowId] = useState<string | null>(null);
+  const { reviewingRowId, setReviewingRowId, handleOpenLink } =
+    useReviewingSession();
 
   const RATING_FIELDS: { key: keyof Ratings; label: string }[] = [
     ...SEVERITY_FIELDS.map((f) => ({ key: f.key, label: f.label })),
@@ -251,16 +254,11 @@ export function CrosscheckDashboard() {
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center justify-end gap-2 whitespace-nowrap">
-                        <a
+                        <SessionLink
                           href={row.link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={() => setReviewingRowId(row.sessionId)}
-                          title="Open session"
-                          className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 transition-colors"
-                        >
-                          <ExternalLink size={15} />
-                        </a>
+                          sessionId={row.sessionId}
+                          onOpen={handleOpenLink}
+                        />
                         <button
                           onClick={() => {
                             setReviewingRowId(row.sessionId);
@@ -381,15 +379,12 @@ export function CrosscheckDashboard() {
                   </span>
                 </div>
                 <div className="flex items-center gap-2 mt-3">
-                  <a
+                  <SessionLink
                     href={row.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => setReviewingRowId(row.sessionId)}
-                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 text-xs font-medium hover:bg-slate-50"
-                  >
-                    <ExternalLink size={13} /> Open footage
-                  </a>
+                    sessionId={row.sessionId}
+                    onOpen={handleOpenLink}
+                    fullWidth={true}
+                  />
                   <button
                     onClick={() => {
                       setReviewingRowId(row.sessionId);

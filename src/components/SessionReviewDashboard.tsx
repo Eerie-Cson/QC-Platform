@@ -13,10 +13,12 @@ import { formatTimestamp, isRatingEmpty, isRatingComplete } from "../utils";
 import { useSessions } from "../hooks/useSessions";
 import { useToast } from "../hooks/useToast";
 import { useHoverSummary } from "../hooks/useHoverSummary";
+import { useReviewingSession } from "../hooks/useReviewingSession";
 import { RatingSummaryCard } from "./RatingSummaryCard";
 import { RatingModal } from "./RatingModal";
 import { SessionFilters } from "./SessionFilters";
 import { TaskSearchInput } from "./TaskSearchInput";
+import { SessionLink } from "./SessionLink";
 
 export function SessionReviewDashboard() {
   const {
@@ -42,11 +44,8 @@ export function SessionReviewDashboard() {
   const [activeRow, setActiveRow] = useState<
     (SessionRow & { faceVisible?: boolean }) | null
   >(null);
-  const [reviewingRowId, setReviewingRowId] = useState<string | null>(null);
-
-  const handleOpenLink = (sessionId: string) => {
-    setReviewingRowId(sessionId);
-  };
+  const { reviewingRowId, setReviewingRowId, handleOpenLink } =
+    useReviewingSession();
 
   const handleSubmitRating = async (
     submittedRatings: Ratings,
@@ -226,18 +225,11 @@ export function SessionReviewDashboard() {
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center justify-end gap-2 whitespace-nowrap">
-                        <a
+                        <SessionLink
                           href={row.link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={() => handleOpenLink(row.sessionId)}
-                          onAuxClick={() => handleOpenLink(row.sessionId)}
-                          onContextMenu={() => handleOpenLink(row.sessionId)}
-                          title="Open session"
-                          className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 transition-colors"
-                        >
-                          <ExternalLink size={15} />
-                        </a>
+                          sessionId={row.sessionId}
+                          onOpen={handleOpenLink}
+                        />
                         <button
                           onClick={() => {
                             setReviewingRowId(row.sessionId);
@@ -355,17 +347,12 @@ export function SessionReviewDashboard() {
                   </span>
                 </div>
                 <div className="flex items-center gap-2 mt-3">
-                  <a
+                  <SessionLink
                     href={row.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => handleOpenLink(row.sessionId)}
-                    onAuxClick={() => handleOpenLink(row.sessionId)}
-                    onContextMenu={() => handleOpenLink(row.sessionId)}
-                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 text-xs font-medium hover:bg-slate-50"
-                  >
-                    <ExternalLink size={13} /> Open footage
-                  </a>
+                    sessionId={row.sessionId}
+                    onOpen={handleOpenLink}
+                    fullWidth={true}
+                  />
                   <button
                     onClick={() => {
                       setReviewingRowId(row.sessionId);

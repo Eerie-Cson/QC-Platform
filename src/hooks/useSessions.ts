@@ -1,7 +1,7 @@
 // hooks/useSessions.ts
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { SessionRow, Ratings } from "../types";
-import { isRatingEmpty, isRatingComplete } from "../utils";
+import { isRatingEmpty, isRatingComplete, formatFileDate } from "../utils";
 
 export type FilterState = {
   lighting: string;
@@ -203,8 +203,9 @@ export function useSessions({
       const a = document.createElement("a");
       a.href = url;
       a.download = exportEndpoint.includes("crosscheck")
-        ? `crosschecked_footages - ${new Date().toISOString().split("T")[0]}.csv`
-        : `rated_footages - ${new Date().toISOString().split("T")[0]}.csv`;
+        ? formatFileDate("crosscheck")
+        : formatFileDate("qc");
+
       document.body.appendChild(a);
       a.click();
       a.remove();

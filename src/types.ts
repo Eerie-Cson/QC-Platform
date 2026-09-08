@@ -34,6 +34,7 @@ export interface SessionRow {
   link: string;
   ratings?: Ratings;
   systemRating: string;
+  personalGmail?: boolean;
 }
 
 export type Ratings = {

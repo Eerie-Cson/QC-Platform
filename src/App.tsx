@@ -14,7 +14,7 @@ export default function App() {
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
       `}</style>
       <div className="sticky top-0 z-40 bg-white border-b border-slate-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center gap-2">
+        <div className="max-w-8xl mx-auto px-4 sm:px-6 py-3 flex items-center gap-2">
           <button
             onClick={() => setTab("review")}
             className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-medium border transition-colors ${

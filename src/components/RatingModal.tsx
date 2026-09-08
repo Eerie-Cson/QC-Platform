@@ -462,6 +462,15 @@ export function RatingModal({
             </div>
           )}
 
+          {row.personalGmail && (
+            <div className="flex items-start gap-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+              <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+              <span>
+                This session uses a personal Gmail account. Skip this session!
+              </span>
+            </div>
+          )}
+
           {/* System rating – compact */}
           <div>
             <span

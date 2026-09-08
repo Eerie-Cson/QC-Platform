@@ -81,7 +81,7 @@ export function SessionReviewDashboard() {
 
   return (
     <div className="min-h-screen bg-[#F7F8FA]" style={{ fontFamily: FONT_UI }}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10">
+      <div className="max-w-8xl mx-auto px-4 sm:px-6 py-10">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-5 mb-7 sticky top-[56px] z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 bg-[#F7F8FA]/95 backdrop-blur-sm">
           <div>

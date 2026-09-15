@@ -516,13 +516,28 @@ export function RatingModal({
               {row.email} · {row.sessionId}
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg p-1.5 transition-colors shrink-0"
-            aria-label="Close"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {row.link && (
+              <a
+                href={row.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open session link in new tab"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors"
+                style={{ fontFamily: FONT_UI }}
+              >
+                <ExternalLink size={13} />
+                <span className="hidden sm:inline">Open session</span>
+              </a>
+            )}
+            <button
+              onClick={onClose}
+              className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg p-1.5 transition-colors shrink-0"
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Body */}

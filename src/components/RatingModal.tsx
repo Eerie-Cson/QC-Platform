@@ -10,6 +10,7 @@ import {
   CheckCheck,
   Edit3,
   RotateCcw,
+  ExternalLink,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
@@ -168,6 +169,7 @@ export function RatingModal({
   const [showCommentBox, setShowCommentBox] = useState(false);
   const [isHoveringApproval, setIsHoveringApproval] = useState(false);
   const [systemRating, setSystemRating] = useState(row.systemRating || "");
+  const [showMidciDialog, setShowMidciDialog] = useState(false);
 
   const commentRef = useRef<HTMLTextAreaElement>(null);
   const crosscheckCommentRef = useRef<HTMLTextAreaElement>(null);
@@ -379,7 +381,79 @@ export function RatingModal({
     setShowOrientationDialog(false);
   };
 
+  // Helper: check if there is any major issue (for midcitigarments special case)
+  const hasMajorIssue = (r: Ratings): boolean => {
+    const severityKeys: (keyof Pick<
+      Ratings,
+      | "lighting"
+      | "sharpness"
+      | "handVisibility"
+      | "fovFraming"
+      | "cameraAngle"
+      | "idle"
+    >)[] = [
+      "lighting",
+      "sharpness",
+      "handVisibility",
+      "fovFraming",
+      "cameraAngle",
+      "idle",
+    ];
+    for (const f of severityKeys) {
+      if (r[f] === Severity.Major) return true;
+    }
+    if (r.seated === Seated.Seated || r.other === Severity.Major) return true;
+    return false;
+  };
+
+  // Helper: get underscore‑joined list of major field names (capitalized camelCase)
+  const getMajorFieldsString = (r: Ratings): string => {
+    const majorKeys: string[] = [];
+    const severityKeys: (keyof Pick<
+      Ratings,
+      | "lighting"
+      | "sharpness"
+      | "handVisibility"
+      | "fovFraming"
+      | "cameraAngle"
+      | "idle"
+    >)[] = [
+      "lighting",
+      "sharpness",
+      "handVisibility",
+      "fovFraming",
+      "cameraAngle",
+      "idle",
+    ];
+    for (const key of severityKeys) {
+      if (r[key] === Severity.Major) {
+        // Capitalize first letter (e.g., "handVisibility" -> "HandVisibility")
+        const label = key.charAt(0).toUpperCase() + key.slice(1);
+        majorKeys.push(label);
+      }
+    }
+    if (r.seated === Seated.Seated) {
+      majorKeys.push("Seated");
+    }
+    if (r.environment === Environment.WrongTask) {
+      majorKeys.push("Environment");
+    }
+    if (r.other === Severity.Major) {
+      majorKeys.push("Other");
+    }
+    return majorKeys.join("_");
+  };
+
   const handleSubmitClick = () => {
+    // Special case: midcitigarments and major issue
+    if (row.email === "accounts@midcitigarments.com" && hasMajorIssue(rating)) {
+      // Build and copy the sessionId_majorFields string
+      const majorFields = getMajorFieldsString(rating);
+      const copyText = `${row.sessionId}_${majorFields}`;
+      navigator.clipboard.writeText(copyText).catch(console.error);
+      setShowMidciDialog(true);
+      return;
+    }
     onSubmit(rating, systemRating, faceVisible);
   };
 
@@ -933,6 +1007,45 @@ export function RatingModal({
                 className="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm shadow-blue-600/20"
               >
                 Yes, it's wrong orientation
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Midcitigarments major issue dialog */}
+      {showMidciDialog && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/70 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6 border border-slate-200">
+            <h3 className="text-lg font-semibold text-slate-900">
+              Major Issue Detected
+            </h3>
+            <p className="text-sm text-slate-600 mt-2">
+              This session from midcitigarments has a major issue. Would you
+              like to open the video link in a new tab?
+            </p>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowMidciDialog(false);
+                  // Proceed without opening link
+                  onSubmit(rating, systemRating, faceVisible);
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-500 hover:bg-slate-100 transition-colors"
+              >
+                No
+              </button>
+              <button
+                onClick={() => {
+                  setShowMidciDialog(false);
+                  // Open link in new tab
+                  window.open(row.link, "_blank");
+                  // Then submit
+                  onSubmit(rating, systemRating, faceVisible);
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm shadow-blue-600/20"
+              >
+                Yes
               </button>
             </div>
           </div>

@@ -132,7 +132,7 @@ export function generateComment(
     const otherLabel =
       rating.other === "Processing" || rating.other === "Unavailable"
         ? rating.other
-        : `Other issue (${rating.other.toLowerCase()})- privacy concern`;
+        : `Other issue (${rating.other.toLowerCase()}) - privacy concern`;
     parts.push(otherLabel);
   }
 

@@ -6,6 +6,7 @@ import {
   Circle,
   CheckCircle2,
   AlertTriangle,
+  Copy,
 } from "lucide-react";
 import { SessionRow, Ratings } from "../types";
 import { FONT_DISPLAY, FONT_UI, FONT_DATA } from "../constants";
@@ -189,7 +190,19 @@ export function SessionReviewDashboard() {
                     >
                       {row.sessionId}
                     </td>
-                    <td className="px-5 py-4 text-slate-600">{row.task}</td>
+                    <td className="px-5 py-4 text-slate-600">
+                      <div className="flex items-center gap-2">
+                        <span>{row.task}</span>
+                        {row.duplicate && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wider text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded"
+                            title="This sessionId appeared more than once in the QC input"
+                          >
+                            <Copy size={11} /> Duplicate
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td
                       className="px-5 py-4 text-slate-600 text-[13px]"
                       style={{ fontFamily: FONT_DATA }}
@@ -286,7 +299,17 @@ export function SessionReviewDashboard() {
                     <p className="font-medium text-slate-800 text-sm truncate">
                       {row.email}
                     </p>
-                    <p className="text-slate-500 text-sm mt-0.5">{row.task}</p>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      <p className="text-slate-500 text-sm">{row.task}</p>
+                      {row.duplicate && (
+                        <span
+                          className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded"
+                          title="This sessionId appeared more than once in the QC input"
+                        >
+                          <Copy size={10} /> Duplicate
+                        </span>
+                      )}
+                    </div>
                     <p
                       className="text-slate-400 text-[11px] mt-1 truncate"
                       style={{ fontFamily: FONT_DATA }}

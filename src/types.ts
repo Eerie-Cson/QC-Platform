@@ -35,6 +35,7 @@ export interface SessionRow {
   ratings?: Ratings;
   systemRating: string;
   personalGmail?: boolean;
+  duplicate?: boolean;
 }
 
 export type Ratings = {

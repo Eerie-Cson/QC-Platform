@@ -179,7 +179,7 @@ export function RatingModal({
   const crosscheckComment = rating.crosscheckComment || "";
   const isApproved = crosscheckComment === "Ok";
 
-  const isLinkMismatch = !row.link.includes(row.sessionId);
+  const isLinkMismatch = !row.link.endsWith(row.sessionId);
 
   // Auto‑show comment box if there's a non‑"Ok" custom comment
   useEffect(() => {
@@ -503,12 +503,22 @@ export function RatingModal({
             >
               {isCrosscheck ? "Crosscheck video" : "Rate video"}
             </p>
-            <h2
-              className="text-lg font-semibold text-slate-900 mt-0.5 tracking-tight truncate"
-              style={{ fontFamily: FONT_DISPLAY }}
-            >
-              {row.task}
-            </h2>
+            <div className="flex items-center gap-2 mt-0.5">
+              <h2
+                className="text-lg font-semibold text-slate-900 tracking-tight truncate"
+                style={{ fontFamily: FONT_DISPLAY }}
+              >
+                {row.task}
+              </h2>
+              {row.duplicate && (
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shrink-0"
+                  title="This sessionId appeared more than once in the QC input"
+                >
+                  <Copy size={10} /> Duplicate
+                </span>
+              )}
+            </div>
             <p
               className="text-xs text-slate-400 mt-0.5"
               style={{ fontFamily: FONT_DATA }}
@@ -542,8 +552,18 @@ export function RatingModal({
 
         {/* Body */}
         <div className="px-5 py-4 overflow-y-auto space-y-4">
-          {isLinkMismatch && (
+          {row.duplicate && (
             <div className="flex items-start gap-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+              <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+              <span>
+                This session appeared more than once. Double-check the task and
+                session ID before rating.
+              </span>
+            </div>
+          )}
+
+          {isLinkMismatch && (
+            <div className="flex items-start gap-2 p-2 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-sm">
               <AlertTriangle size={16} className="shrink-0 mt-0.5" />
               <span>
                 Session ID does not appear in the link. Verify correct video.

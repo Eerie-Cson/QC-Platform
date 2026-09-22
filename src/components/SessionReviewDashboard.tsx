@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Download,
-  ExternalLink,
   Star,
+  Play,
+  SquarePen,
   Circle,
   CheckCircle2,
   AlertTriangle,
@@ -26,6 +27,7 @@ export function SessionReviewDashboard() {
     filteredRows,
     rows,
     ratings,
+    loading,
     reviewedCount,
     submitRating,
     exportCSV,
@@ -74,6 +76,62 @@ export function SessionReviewDashboard() {
       showToast("Failed to export CSV");
     }
   };
+
+  const hasAutoScrolled = useRef(false);
+  const scrollTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (scrollTimer.current !== null)
+        window.clearTimeout(scrollTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    // Only ever run once, and only once the data has actually arrived
+    if (loading || hasAutoScrolled.current || filteredRows.length === 0) return;
+
+    // Target the first session that is fully unrated ("Rate video" state).
+    // In-progress drafts are intentionally skipped so the reviewer lands on
+    // genuinely fresh footage. If everything is already rated or drafted,
+    // there's nothing to resume, so we leave the page at the top.
+    const target = filteredRows.find((row) => {
+      const rating = ratings[row.sessionId] || {};
+      return isRatingEmpty(rating);
+    });
+    if (!target) {
+      hasAutoScrolled.current = true;
+      return;
+    }
+
+    hasAutoScrolled.current = true;
+
+    // Small delay so the table/cards have laid out before we measure them
+    scrollTimer.current = window.setTimeout(() => {
+      const el = findVisibleRowElement(target.sessionId);
+      if (!el) return;
+
+      const prefersReducedMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)",
+      ).matches;
+
+      el.scrollIntoView({
+        behavior: prefersReducedMotion ? "auto" : "smooth",
+        block: "center", // centres the row so the sticky header never covers it
+      });
+
+      // Brief pulse so the reviewer can see where they landed
+      if (!prefersReducedMotion) {
+        el.animate(
+          [
+            { backgroundColor: "rgba(37, 99, 235, 0.16)" },
+            { backgroundColor: "rgba(37, 99, 235, 0)" },
+          ],
+          { duration: 1600, easing: "ease-out" },
+        );
+      }
+    }, 150);
+  }, [loading, filteredRows, ratings]);
 
   const hoveredRating = hoveredRowId ? ratings[hoveredRowId] : undefined;
   const progressPct = rows.length
@@ -165,6 +223,7 @@ export function SessionReviewDashboard() {
                 return (
                   <tr
                     key={row.sessionId}
+                    data-session-id={row.sessionId}
                     onMouseEnter={(e) => handleRowEnter(row.sessionId, e)}
                     onMouseLeave={handleRowLeave}
                     className={`border-b border-slate-100 last:border-0 transition-colors ${
@@ -248,14 +307,26 @@ export function SessionReviewDashboard() {
                             setReviewingRowId(row.sessionId);
                             setActiveRow(row);
                           }}
-                          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all border cursor-pointer whitespace-nowrap ${
-                            hasRating
-                              ? "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-blue-600 border-slate-300"
-                              : "bg-blue-600 text-white hover:bg-blue-700 border-transparent shadow-sm shadow-blue-600/20"
+                          className={`inline-flex items-center justify-center gap-1.5 min-w-[120px] px-3 py-2 rounded-lg text-xs font-semibold transition-all border cursor-pointer whitespace-nowrap ${
+                            done
+                              ? "bg-slate-100 text-blue-500 hover:bg-blue-50 hover:text-blue-700 border-slate-300 hover:border-blue-300"
+                              : hasRating
+                                ? "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-blue-600 border-slate-300"
+                                : "bg-blue-600 text-white hover:bg-blue-700 border-transparent shadow-sm shadow-blue-600/20"
                           }`}
                         >
-                          <Star size={13} />
-                          {hasRating ? "Edit review" : "Rate video"}
+                          {done ? (
+                            <SquarePen size={13} />
+                          ) : hasRating ? (
+                            <Play size={13} />
+                          ) : (
+                            <Star size={13} />
+                          )}
+                          {done
+                            ? "Edit review"
+                            : hasRating
+                              ? "Update draft"
+                              : "Rate video"}
                         </button>
                       </div>
                     </td>
@@ -286,6 +357,7 @@ export function SessionReviewDashboard() {
             return (
               <div
                 key={row.sessionId}
+                data-session-id={row.sessionId}
                 onMouseEnter={(e) => handleRowEnter(row.sessionId, e)}
                 onMouseLeave={handleRowLeave}
                 className={`bg-white rounded-xl border p-4 shadow-sm transition-all ${
@@ -381,14 +453,26 @@ export function SessionReviewDashboard() {
                       setReviewingRowId(row.sessionId);
                       setActiveRow(row);
                     }}
-                    className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border cursor-pointer ${
-                      hasRating
-                        ? "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-blue-600 border-slate-300"
-                        : "bg-blue-600 text-white hover:bg-blue-700 border-transparent shadow-sm shadow-blue-600/20"
+                    className={`flex-1 inline-flex items-center justify-center gap-1.5 min-w-[120px] px-3 py-2 rounded-lg text-xs font-semibold border cursor-pointer ${
+                      done
+                        ? "bg-slate-100 text-blue-600 hover:bg-blue-50 hover:text-blue-700 border-slate-300 hover:border-blue-300"
+                        : hasRating
+                          ? "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-blue-600 border-slate-300"
+                          : "bg-blue-600 text-white hover:bg-blue-700 border-transparent shadow-sm shadow-blue-600/20"
                     }`}
                   >
-                    <Star size={13} />{" "}
-                    {hasRating ? "Edit review" : "Rate video"}
+                    {done ? (
+                      <SquarePen size={13} />
+                    ) : hasRating ? (
+                      <Play size={13} />
+                    ) : (
+                      <Star size={13} />
+                    )}{" "}
+                    {done
+                      ? "Edit review"
+                      : hasRating
+                        ? "Update draft"
+                        : "Rate video"}
                   </button>
                 </div>
               </div>
@@ -444,4 +528,17 @@ export function SessionReviewDashboard() {
       )}
     </div>
   );
+}
+
+/**
+ * The desktop table and the mobile card list are both mounted in the DOM
+ * (they're toggled with `hidden` / `lg:hidden`), so the same sessionId can
+ * match two elements. Return whichever one is actually visible.
+ */
+function findVisibleRowElement(sessionId: string): HTMLElement | null {
+  const nodes = Array.from(
+    document.querySelectorAll<HTMLElement>("[data-session-id]"),
+  ).filter((el) => el.dataset.sessionId === sessionId);
+
+  return nodes.find((el) => el.offsetParent !== null) ?? nodes[0] ?? null;
 }

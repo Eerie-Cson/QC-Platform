@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   Copy,
+  UserPlus,
 } from "lucide-react";
 import { SessionRow, Ratings } from "../types";
 import { FONT_DISPLAY, FONT_UI, FONT_DATA } from "../constants";
@@ -242,6 +243,15 @@ export function SessionReviewDashboard() {
                       }`}
                     >
                       {row.email}
+
+                      {row.new && (
+                        <span
+                          className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wider text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded"
+                          title="This session comes from a newly-created account"
+                        >
+                          <UserPlus size={11} /> New account
+                        </span>
+                      )}
                     </td>
                     <td
                       className="px-5 py-4 text-slate-500 text-[13px]"
@@ -262,6 +272,7 @@ export function SessionReviewDashboard() {
                         )}
                       </div>
                     </td>
+
                     <td
                       className="px-5 py-4 text-slate-600 text-[13px]"
                       style={{ fontFamily: FONT_DATA }}
@@ -373,6 +384,14 @@ export function SessionReviewDashboard() {
                     </p>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                       <p className="text-slate-500 text-sm">{row.task}</p>
+                      {row.new && (
+                        <span
+                          className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded"
+                          title="This session comes from a newly-created account"
+                        >
+                          <UserPlus size={10} /> New
+                        </span>
+                      )}
                       {row.duplicate && (
                         <span
                           className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded"

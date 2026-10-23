@@ -11,6 +11,7 @@ import {
   Edit3,
   RotateCcw,
   ExternalLink,
+  UserPlus,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
@@ -170,6 +171,7 @@ export function RatingModal({
   const [isHoveringApproval, setIsHoveringApproval] = useState(false);
   const [systemRating, setSystemRating] = useState(row.systemRating || "");
   const [showMidciDialog, setShowMidciDialog] = useState(false);
+  const [copiedSessionId, setCopiedSessionId] = useState(false);
 
   const commentRef = useRef<HTMLTextAreaElement>(null);
   const crosscheckCommentRef = useRef<HTMLTextAreaElement>(null);
@@ -461,6 +463,16 @@ export function RatingModal({
     navigator.clipboard.writeText(originalComment);
   };
 
+  const handleCopySessionId = () => {
+    navigator.clipboard
+      .writeText(row.sessionId)
+      .then(() => {
+        setCopiedSessionId(true);
+        window.setTimeout(() => setCopiedSessionId(false), 1500);
+      })
+      .catch(console.error);
+  };
+
   const toggleOriginalVisibility = () => {
     setShowOriginalComment((prev) => !prev);
   };
@@ -510,6 +522,14 @@ export function RatingModal({
               >
                 {row.task}
               </h2>
+              {row.new && (
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded shrink-0"
+                  title="This session comes from a newly-created account"
+                >
+                  <UserPlus size={10} /> New account
+                </span>
+              )}
               {row.duplicate && (
                 <span
                   className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shrink-0"
@@ -519,12 +539,27 @@ export function RatingModal({
                 </span>
               )}
             </div>
-            <p
-              className="text-xs text-slate-400 mt-0.5"
-              style={{ fontFamily: FONT_DATA }}
-            >
-              {row.email} · {row.sessionId}
-            </p>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <p
+                className="text-xs text-slate-400 truncate"
+                style={{ fontFamily: FONT_DATA }}
+              >
+                {row.email} · {row.sessionId}
+              </p>
+              <button
+                type="button"
+                onClick={handleCopySessionId}
+                title={copiedSessionId ? "Copied!" : "Copy session ID"}
+                aria-label="Copy session ID"
+                className={`shrink-0 inline-flex items-center justify-center w-5 h-5 rounded transition-colors cursor-pointer ${
+                  copiedSessionId
+                    ? "text-emerald-600 bg-emerald-50"
+                    : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                {copiedSessionId ? <Check size={12} /> : <Copy size={12} />}
+              </button>
+            </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             {row.link && (
@@ -552,6 +587,16 @@ export function RatingModal({
 
         {/* Body */}
         <div className="px-5 py-4 overflow-y-auto space-y-4">
+          {/* {row.new && (
+            <div className="flex items-start gap-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm">
+              <UserPlus size={16} className="shrink-0 mt-0.5" />
+              <span>
+                This session was flagged as a <strong>new account</strong>.
+                Extra attention to task orientation and setup may be warranted.
+              </span>
+            </div>
+          )} */}
+
           {row.duplicate && (
             <div className="flex items-start gap-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
               <AlertTriangle size={16} className="shrink-0 mt-0.5" />

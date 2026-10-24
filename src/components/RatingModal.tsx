@@ -1,5 +1,5 @@
 // components/RatingModal.tsx
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, MouseEvent } from "react";
 import {
   X,
   Copy,
@@ -12,6 +12,7 @@ import {
   RotateCcw,
   ExternalLink,
   UserPlus,
+  Trash2,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
@@ -46,6 +47,7 @@ import {
   emptyRating,
   isRatingComplete,
   toggleStrikethrough,
+  isRatingEmpty,
 } from "../utils";
 
 // ---------------------------------------------------------------------------
@@ -158,7 +160,31 @@ export function RatingModal({
   onSubmit,
   mode,
 }: RatingModalProps) {
-  const [rating, setRating] = useState<Ratings>(initial ?? emptyRating());
+  const [rating, setRating] = useState<Ratings>(() => {
+    if (initial) return initial;
+
+    // Default to "No Issue" for a fresh rating
+    const defaultRating = {
+      lighting: Severity.NoIssue,
+      sharpness: Severity.NoIssue,
+      handVisibility: Severity.NoIssue,
+      fovFraming: Severity.NoIssue,
+      cameraAngle: Severity.NoIssue,
+      idle: Severity.NoIssue,
+      seated: Seated.StandingMoving,
+      environment: Environment.CorrectTask,
+      other: Severity.NoIssue,
+      slowLoading: false,
+    } as Ratings;
+
+    defaultRating.comment = generateComment(
+      defaultRating,
+      row.faceVisible ?? false,
+      false,
+    );
+    return defaultRating;
+  });
+
   const [commentManuallyEdited, setCommentManuallyEdited] = useState(false);
   const [showOrientationDialog, setShowOrientationDialog] = useState(false);
   const [orientationDialogShown, setOrientationDialogShown] = useState(false);
@@ -189,21 +215,6 @@ export function RatingModal({
       setShowCommentBox(true);
     }
   }, [isCrosscheck, crosscheckComment, isApproved]);
-
-  // ESC key to close modal (or close orientation dialog first)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (showOrientationDialog) {
-          setShowOrientationDialog(false);
-        } else {
-          onClose();
-        }
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [showOrientationDialog, onClose]);
 
   const handleFaceVisibleChange = (checked: boolean) => {
     setFaceVisible(checked);
@@ -307,8 +318,7 @@ export function RatingModal({
     });
   };
 
-  // Quick action: set every quality field (except System rating) to its
-  // "no issue" / green state in one click.
+  // Set every quality field (except System rating) to its "no issue" state
   const handleSetAllNoIssue = () => {
     setRating((prev) => {
       const newRating: Ratings = { ...prev, slowLoading: false };
@@ -330,6 +340,21 @@ export function RatingModal({
 
       return newRating;
     });
+  };
+
+  // Clear all rating fields
+  const handleClearRating = () => {
+    setRating((prev) => {
+      const newRating: Ratings = { ...prev, slowLoading: false, comment: "" };
+      SEVERITY_FIELDS.forEach((f) => {
+        newRating[f.key] = "";
+      });
+      newRating.seated = "";
+      newRating.environment = "";
+      newRating.other = "";
+      return newRating;
+    });
+    setCommentManuallyEdited(false);
   };
 
   const complete = isRatingComplete(rating);
@@ -459,6 +484,31 @@ export function RatingModal({
     onSubmit(rating, systemRating, faceVisible);
   };
 
+  // Ref to hold the latest handleSubmitClick for the keydown listener
+  const handleSubmitClickRef = useRef(handleSubmitClick);
+  useEffect(() => {
+    handleSubmitClickRef.current = handleSubmitClick;
+  });
+
+  // ESC to close, Ctrl/Cmd + Enter to submit
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (showOrientationDialog) {
+          setShowOrientationDialog(false);
+        } else {
+          onClose();
+        }
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        handleSubmitClickRef.current();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [showOrientationDialog, onClose]);
+
   const handleCopyOriginal = () => {
     navigator.clipboard.writeText(originalComment);
   };
@@ -501,6 +551,12 @@ export function RatingModal({
         crosscheckCommentRef.current?.focus();
       }, 100);
     }
+  };
+
+  // --- NEW: Trigger the split screen extension ---
+  const handleOpenSplit = (e: MouseEvent) => {
+    e.preventDefault();
+    window.postMessage({ type: "OPEN_VIDEO_IN_SPLIT", url: row.link }, "*");
   };
 
   return (
@@ -567,8 +623,9 @@ export function RatingModal({
                 href={row.link}
                 target="_blank"
                 rel="noopener noreferrer"
-                title="Open session link in new tab"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors"
+                onClick={handleOpenSplit}
+                title="Open session link in split view"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors cursor-pointer"
                 style={{ fontFamily: FONT_UI }}
               >
                 <ExternalLink size={13} />
@@ -587,16 +644,6 @@ export function RatingModal({
 
         {/* Body */}
         <div className="px-5 py-4 overflow-y-auto space-y-4">
-          {/* {row.new && (
-            <div className="flex items-start gap-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm">
-              <UserPlus size={16} className="shrink-0 mt-0.5" />
-              <span>
-                This session was flagged as a <strong>new account</strong>.
-                Extra attention to task orientation and setup may be warranted.
-              </span>
-            </div>
-          )} */}
-
           {row.duplicate && (
             <div className="flex items-start gap-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
               <AlertTriangle size={16} className="shrink-0 mt-0.5" />
@@ -658,15 +705,28 @@ export function RatingModal({
                   >
                     Video quality
                   </p>
-                  <button
-                    type="button"
-                    onClick={handleSetAllNoIssue}
-                    title="Set Lighting, Sharpness, Hand Visibility, FOV Framing, Camera Angle, Idle, Seated, Environment and Other to No issue"
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-full transition-colors cursor-pointer"
-                  >
-                    <CheckCheck size={13} />
-                    Mark all no issue
-                  </button>
+
+                  {isRatingEmpty(rating) ? (
+                    <button
+                      type="button"
+                      onClick={handleSetAllNoIssue}
+                      title="Set all fields to No issue"
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-full transition-colors cursor-pointer"
+                    >
+                      <CheckCheck size={13} />
+                      Mark all no issue
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleClearRating}
+                      title="Clear all rating fields"
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2.5 py-1 rounded-full transition-colors cursor-pointer"
+                    >
+                      <Trash2 size={13} />
+                      Clear rating
+                    </button>
+                  )}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
                   {SEVERITY_FIELDS.map((f) => (
@@ -1118,8 +1178,11 @@ export function RatingModal({
               <button
                 onClick={() => {
                   setShowMidciDialog(false);
-                  // Open link in new tab
-                  window.open(row.link, "_blank");
+                  // Open link in split view instead of new tab
+                  window.postMessage(
+                    { type: "OPEN_VIDEO_IN_SPLIT", url: row.link },
+                    "*",
+                  );
                   // Then submit
                   onSubmit(rating, systemRating, faceVisible);
                 }}

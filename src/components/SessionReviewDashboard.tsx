@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Download,
   Star,
@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   Copy,
   UserPlus,
+  Zap,
 } from "lucide-react";
 import { SessionRow, Ratings } from "../types";
 import { FONT_DISPLAY, FONT_UI, FONT_DATA } from "../constants";
@@ -22,6 +23,8 @@ import { RatingModal } from "./RatingModal";
 import { SessionFilters } from "./SessionFilters";
 import { TaskSearchInput } from "./TaskSearchInput";
 import { SessionLink } from "./SessionLink";
+
+const AUTO_NEXT_STORAGE_KEY = "sessionQa.autoNext";
 
 export function SessionReviewDashboard() {
   const {
@@ -51,23 +54,92 @@ export function SessionReviewDashboard() {
   const { reviewingRowId, setReviewingRowId, handleOpenLink } =
     useReviewingSession();
 
+  const [autoNext, setAutoNext] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(AUTO_NEXT_STORAGE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(AUTO_NEXT_STORAGE_KEY, autoNext ? "1" : "0");
+    } catch {}
+  }, [autoNext]);
+
+  const findNextUnratedRow = useCallback(
+    (currentSessionId: string): SessionRow | undefined => {
+      const idx = filteredRows.findIndex(
+        (r) => r.sessionId === currentSessionId,
+      );
+      if (idx === -1) return undefined;
+
+      const isCandidate = (r: SessionRow) =>
+        r.sessionId !== currentSessionId &&
+        isRatingEmpty(ratings[r.sessionId] || {});
+
+      return (
+        filteredRows.slice(idx + 1).find(isCandidate) ??
+        filteredRows.slice(0, idx).find(isCandidate)
+      );
+    },
+    [filteredRows, ratings],
+  );
+
   const handleSubmitRating = async (
     submittedRatings: Ratings,
     systemRating: string,
     faceVisible?: boolean,
   ) => {
     if (!activeRow) return;
+
+    const currentSessionId = activeRow.sessionId;
+    const nextRow = autoNext ? findNextUnratedRow(currentSessionId) : undefined;
+
+    if (nextRow) {
+      window.postMessage(
+        { type: "OPEN_VIDEO_IN_SPLIT", url: nextRow.link },
+        "*",
+      );
+    }
+
     const result = await submitRating(
-      activeRow.sessionId,
+      currentSessionId,
       submittedRatings,
       systemRating,
       faceVisible,
     );
-    if (result.success) {
-      showToast(`Review saved for ${activeRow.email}`);
-      setActiveRow(null);
-    } else {
+
+    if (!result.success) {
       showToast("Failed to save review");
+      return;
+    }
+
+    if (nextRow) {
+      showToast(`Review saved · next: ${nextRow.email}`);
+      setReviewingRowId(nextRow.sessionId);
+      setActiveRow(nextRow);
+
+      window.setTimeout(() => {
+        const el = findVisibleRowElement(nextRow.sessionId);
+        if (!el) return;
+        const prefersReducedMotion = window.matchMedia(
+          "(prefers-reduced-motion: reduce)",
+        ).matches;
+        el.scrollIntoView({
+          behavior: prefersReducedMotion ? "auto" : "smooth",
+          block: "center",
+        });
+      }, 100);
+    } else {
+      showToast(
+        autoNext
+          ? `Review saved for ${activeRow.email} · all caught up`
+          : `Review saved for ${activeRow.email}`,
+      );
+      setActiveRow(null);
+      setReviewingRowId(null);
     }
   };
 
@@ -89,13 +161,8 @@ export function SessionReviewDashboard() {
   }, []);
 
   useEffect(() => {
-    // Only ever run once, and only once the data has actually arrived
     if (loading || hasAutoScrolled.current || filteredRows.length === 0) return;
 
-    // Target the first session that is fully unrated ("Rate video" state).
-    // In-progress drafts are intentionally skipped so the reviewer lands on
-    // genuinely fresh footage. If everything is already rated or drafted,
-    // there's nothing to resume, so we leave the page at the top.
     const target = filteredRows.find((row) => {
       const rating = ratings[row.sessionId] || {};
       return isRatingEmpty(rating);
@@ -107,7 +174,6 @@ export function SessionReviewDashboard() {
 
     hasAutoScrolled.current = true;
 
-    // Small delay so the table/cards have laid out before we measure them
     scrollTimer.current = window.setTimeout(() => {
       const el = findVisibleRowElement(target.sessionId);
       if (!el) return;
@@ -118,10 +184,9 @@ export function SessionReviewDashboard() {
 
       el.scrollIntoView({
         behavior: prefersReducedMotion ? "auto" : "smooth",
-        block: "center", // centres the row so the sticky header never covers it
+        block: "center",
       });
 
-      // Brief pulse so the reviewer can see where they landed
       if (!prefersReducedMotion) {
         el.animate(
           [
@@ -178,7 +243,7 @@ export function SessionReviewDashboard() {
             </div>
           </div>
 
-          {/* Header actions: Task search + Filter toggle + Export button */}
+          {/* Header actions */}
           <div className="flex items-center gap-2 relative self-start sm:self-auto">
             <TaskSearchInput filters={filters} setFilters={setFilters} />
             <SessionFilters
@@ -187,6 +252,26 @@ export function SessionReviewDashboard() {
               clearFilters={clearFilters}
               hasActiveFilters={hasActiveFilters}
             />
+            <button
+              type="button"
+              onClick={() => setAutoNext((v) => !v)}
+              aria-pressed={autoNext}
+              title={
+                autoNext
+                  ? "Auto-next is on — submitting a review opens the next unrated session"
+                  : "Auto-next is off — enable to jump to the next unrated session after submitting"
+              }
+              className={`inline-flex items-center gap-1.5 px-3 py-2.5 rounded-lg text-sm font-medium border transition-colors ${
+                autoNext
+                  ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+              }`}
+            >
+              <Zap size={16} />
+              <span className="hidden lg:inline">
+                {autoNext ? "Auto-next on" : "Auto-next"}
+              </span>
+            </button>
             <button
               onClick={handleDownload}
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 active:bg-slate-950 transition-colors shadow-sm"
@@ -311,7 +396,13 @@ export function SessionReviewDashboard() {
                         <SessionLink
                           href={row.link}
                           sessionId={row.sessionId}
-                          onOpen={handleOpenLink}
+                          onOpen={(sessionId, href) => {
+                            handleOpenLink(sessionId);
+                            window.postMessage(
+                              { type: "OPEN_VIDEO_IN_SPLIT", url: href },
+                              "*",
+                            );
+                          }}
                         />
                         <button
                           onClick={() => {
@@ -464,7 +555,13 @@ export function SessionReviewDashboard() {
                   <SessionLink
                     href={row.link}
                     sessionId={row.sessionId}
-                    onOpen={handleOpenLink}
+                    onOpen={(sessionId, href) => {
+                      handleOpenLink(sessionId);
+                      window.postMessage(
+                        { type: "OPEN_VIDEO_IN_SPLIT", url: href },
+                        "*",
+                      );
+                    }}
                     fullWidth={true}
                   />
                   <button
@@ -528,9 +625,13 @@ export function SessionReviewDashboard() {
       {/* Modal */}
       {activeRow && (
         <RatingModal
+          key={activeRow.sessionId}
           row={activeRow}
           initial={ratings[activeRow.sessionId]}
-          onClose={() => setActiveRow(null)}
+          onClose={() => {
+            setActiveRow(null);
+            setReviewingRowId(null);
+          }}
           onSubmit={handleSubmitRating}
           mode="review"
         />
@@ -549,11 +650,6 @@ export function SessionReviewDashboard() {
   );
 }
 
-/**
- * The desktop table and the mobile card list are both mounted in the DOM
- * (they're toggled with `hidden` / `lg:hidden`), so the same sessionId can
- * match two elements. Return whichever one is actually visible.
- */
 function findVisibleRowElement(sessionId: string): HTMLElement | null {
   const nodes = Array.from(
     document.querySelectorAll<HTMLElement>("[data-session-id]"),

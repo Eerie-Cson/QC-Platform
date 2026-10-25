@@ -1,6 +1,6 @@
 import { Search, X } from "lucide-react";
 import { FilterState } from "../hooks/useSessions";
-import { FONT_UI } from "../constants";
+import { FONT_UI } from "../utilities/constants";
 
 interface TaskSearchInputProps {
   filters: FilterState;

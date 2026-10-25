@@ -1,6 +1,6 @@
 // components/PillSegmentedField.tsx
 import React from "react";
-import { FONT_UI } from "../constants";
+import { FONT_UI } from "../utilities/constants";
 
 interface PillSegmentedFieldProps<T extends string> {
   options: T[];

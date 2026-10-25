@@ -1,4 +1,4 @@
-import { Ratings } from "../types";
+import { Ratings } from "./utilities/types";
 import {
   SEVERITY_STYLES,
   SEATED_STYLE_MAP,
@@ -6,7 +6,7 @@ import {
   SYSTEM_RATING_STYLES,
   SUMMARY_ABBR,
   SEVERITY_FIELDS,
-} from "../constants";
+} from "../utilities/constants";
 
 interface RatingSummaryCardProps {
   rating: Ratings;

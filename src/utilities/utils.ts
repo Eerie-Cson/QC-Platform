@@ -1,5 +1,5 @@
 import { Ratings } from "./types";
-import { SEVERITY_FIELDS } from "./constants";
+import { SEVERITY_FIELDS } from "../utilities/constants";
 
 export function formatTimestamp(isoString: string): string {
   if (!isoString) return "";

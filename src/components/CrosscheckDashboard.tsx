@@ -14,14 +14,14 @@ import {
   Seated,
   Environment,
   SystemRating,
-} from "../types";
+} from "../utilities/types";
 import {
   FONT_DISPLAY,
   FONT_UI,
   FONT_DATA,
   SEVERITY_FIELDS,
-} from "../constants";
-import { formatTimestamp, isRatingEmpty } from "../utils";
+} from "../utilities/constants";
+import { formatTimestamp, isRatingEmpty } from "../utilities/utils";
 import { useSessions } from "../hooks/useSessions";
 import { useToast } from "../hooks/useToast";
 import { useHoverSummary } from "../hooks/useHoverSummary";

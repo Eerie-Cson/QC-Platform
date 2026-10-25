@@ -1,7 +1,11 @@
 // hooks/useSessions.ts
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { SessionRow, Ratings } from "../types";
-import { isRatingEmpty, isRatingComplete, formatFileDate } from "../utils";
+import { SessionRow, Ratings } from "./utilities/types";
+import {
+  isRatingEmpty,
+  isRatingComplete,
+  formatFileDate,
+} from "../utilities/utils";
 
 export type FilterState = {
   lighting: string;

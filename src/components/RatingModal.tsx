@@ -24,7 +24,7 @@ import {
   Environment,
   Other,
   SystemRating,
-} from "../types";
+} from "../utilities/types";
 import {
   FONT_DISPLAY,
   FONT_UI,
@@ -39,7 +39,7 @@ import {
   SYSTEM_RATING_ICONS,
   SYSTEM_RATING_LABELS,
   SEVERITY_FIELDS,
-} from "../constants";
+} from "../utilities/constants";
 import { SegmentedField } from "./SegmentedField";
 import { PillSegmentedField } from "./PillSegmentedField";
 import {
@@ -48,7 +48,7 @@ import {
   isRatingComplete,
   toggleStrikethrough,
   isRatingEmpty,
-} from "../utils";
+} from "../utilities/utils";
 
 // ---------------------------------------------------------------------------
 // DropdownField – compact version for crosscheck

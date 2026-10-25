@@ -1,5 +1,5 @@
 // components/SegmentedField.tsx
-import { FONT_UI, SEVERITY_STYLES } from "../constants";
+import { FONT_UI, SEVERITY_STYLES } from "../utilities/constants";
 
 interface SegmentedFieldProps<T extends string> {
   label: string;

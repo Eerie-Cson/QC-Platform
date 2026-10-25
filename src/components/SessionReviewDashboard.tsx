@@ -11,9 +11,14 @@ import {
   UserPlus,
   Zap,
 } from "lucide-react";
-import { SessionRow, Ratings } from "../types";
-import { FONT_DISPLAY, FONT_UI, FONT_DATA } from "../constants";
-import { formatTimestamp, isRatingEmpty, isRatingComplete } from "../utils";
+import { SessionRow, Ratings } from "../utilities/types";
+import { FONT_DISPLAY, FONT_UI, FONT_DATA } from "../utilities/constants";
+import { DailyTracker } from "./DailyTracker";
+import {
+  formatTimestamp,
+  isRatingEmpty,
+  isRatingComplete,
+} from "../utilities/utils";
 import { useSessions } from "../hooks/useSessions";
 import { useToast } from "../hooks/useToast";
 import { useHoverSummary } from "../hooks/useHoverSummary";
@@ -281,6 +286,11 @@ export function SessionReviewDashboard() {
               <span className="lg:hidden">Export</span>
             </button>
           </div>
+        </div>
+
+        {/* Daily tracker */}
+        <div className="mb-6">
+          <DailyTracker days={14} />
         </div>
 
         {/* Table (desktop) */}

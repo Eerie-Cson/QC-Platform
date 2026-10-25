@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { ListChecks, ShieldCheck } from "lucide-react";
 import { SessionReviewDashboard } from "./components/SessionReviewDashboard";
 import { CrosscheckDashboard } from "./components/CrosscheckDashboard";
-import { FONT_UI } from "./constants";
+import { FONT_UI } from "./utilities/constants";
 
 export default function App() {
   const [tab, setTab] = useState<"review" | "crosscheck">("review");

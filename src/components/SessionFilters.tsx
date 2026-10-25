@@ -1,8 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown, SlidersHorizontal, X } from "lucide-react";
 import { FilterState } from "../hooks/useSessions";
-import { Severity, Seated, Environment, SystemRating } from "../types";
-import { FONT_UI } from "../constants";
+import {
+  Severity,
+  Seated,
+  Environment,
+  SystemRating,
+} from "../utilities/types";
+import { FONT_UI } from "../utilities/constants";
 
 // Option arrays
 const SEVERITY_OPTIONS: string[] = ["All", ...Object.values(Severity)];

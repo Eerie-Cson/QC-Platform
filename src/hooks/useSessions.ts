@@ -1,6 +1,6 @@
 // hooks/useSessions.ts
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { SessionRow, Ratings } from "./utilities/types";
+import { SessionRow, Ratings } from "../utilities/types";
 import {
   isRatingEmpty,
   isRatingComplete,

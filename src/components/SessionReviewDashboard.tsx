@@ -92,6 +92,38 @@ export function SessionReviewDashboard() {
     [filteredRows, ratings],
   );
 
+  // Calculate Previous / Next navigation state
+  const activeRowIndex = activeRow
+    ? filteredRows.findIndex((r) => r.sessionId === activeRow.sessionId)
+    : -1;
+  const hasPrev = activeRowIndex > 0;
+  const hasNext =
+    activeRowIndex >= 0 && activeRowIndex < filteredRows.length - 1;
+
+  const handleNavigate = (direction: "prev" | "next") => {
+    if (!activeRow) return;
+    const targetIndex =
+      direction === "prev" ? activeRowIndex - 1 : activeRowIndex + 1;
+    if (targetIndex < 0 || targetIndex >= filteredRows.length) return;
+
+    const targetRow = filteredRows[targetIndex];
+    setReviewingRowId(targetRow.sessionId);
+    setActiveRow(targetRow);
+
+    // Scroll the background table to the new row
+    window.setTimeout(() => {
+      const el = findVisibleRowElement(targetRow.sessionId);
+      if (!el) return;
+      const prefersReducedMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)",
+      ).matches;
+      el.scrollIntoView({
+        behavior: prefersReducedMotion ? "auto" : "smooth",
+        block: "center",
+      });
+    }, 100);
+  };
+
   const handleSubmitRating = async (
     submittedRatings: Ratings,
     systemRating: string,
@@ -644,6 +676,11 @@ export function SessionReviewDashboard() {
           }}
           onSubmit={handleSubmitRating}
           mode="review"
+          autoNext={autoNext}
+          setAutoNext={setAutoNext}
+          hasPrev={hasPrev}
+          hasNext={hasNext}
+          onNavigate={handleNavigate}
         />
       )}
 

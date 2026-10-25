@@ -13,6 +13,9 @@ import {
   ExternalLink,
   UserPlus,
   Trash2,
+  Zap,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
@@ -44,7 +47,6 @@ import { SegmentedField } from "./SegmentedField";
 import { PillSegmentedField } from "./PillSegmentedField";
 import {
   generateComment,
-  emptyRating,
   isRatingComplete,
   toggleStrikethrough,
   isRatingEmpty,
@@ -151,6 +153,11 @@ interface RatingModalProps {
     faceVisible: boolean,
   ) => void;
   mode: "review" | "crosscheck";
+  autoNext: boolean;
+  setAutoNext: (val: boolean) => void;
+  hasPrev: boolean;
+  hasNext: boolean;
+  onNavigate: (direction: "prev" | "next") => void;
 }
 
 export function RatingModal({
@@ -159,6 +166,11 @@ export function RatingModal({
   onClose,
   onSubmit,
   mode,
+  autoNext,
+  setAutoNext,
+  hasPrev,
+  hasNext,
+  onNavigate,
 }: RatingModalProps) {
   const [rating, setRating] = useState<Ratings>(() => {
     if (initial) return initial;
@@ -398,7 +410,7 @@ export function RatingModal({
       comment: newComment,
     }));
     setIsOrientationConfirmed(true);
-    setCommentManuallyEdited(false); // Keep auto‑generate active for other fields
+    setCommentManuallyEdited(false);
     setOrientationDialogShown(true);
     setShowOrientationDialog(false);
   };
@@ -408,7 +420,6 @@ export function RatingModal({
     setShowOrientationDialog(false);
   };
 
-  // Helper: check if there is any major issue (for midcitigarments special case)
   const hasMajorIssue = (r: Ratings): boolean => {
     const severityKeys: (keyof Pick<
       Ratings,
@@ -433,7 +444,6 @@ export function RatingModal({
     return false;
   };
 
-  // Helper: get underscore‑joined list of major field names (capitalized camelCase)
   const getMajorFieldsString = (r: Ratings): string => {
     const majorKeys: string[] = [];
     const severityKeys: (keyof Pick<
@@ -454,7 +464,6 @@ export function RatingModal({
     ];
     for (const key of severityKeys) {
       if (r[key] === Severity.Major) {
-        // Capitalize first letter (e.g., "handVisibility" -> "HandVisibility")
         const label = key.charAt(0).toUpperCase() + key.slice(1);
         majorKeys.push(label);
       }
@@ -474,7 +483,6 @@ export function RatingModal({
   const handleSubmitClick = () => {
     // Special case: midcitigarments and major issue
     if (row.email === "accounts@midcitigarments.com" && hasMajorIssue(rating)) {
-      // Build and copy the sessionId_majorFields string
       const majorFields = getMajorFieldsString(rating);
       const copyText = `${row.sessionId}_${majorFields}`;
       navigator.clipboard.writeText(copyText).catch(console.error);
@@ -484,13 +492,11 @@ export function RatingModal({
     onSubmit(rating, systemRating, faceVisible);
   };
 
-  // Ref to hold the latest handleSubmitClick for the keydown listener
   const handleSubmitClickRef = useRef(handleSubmitClick);
   useEffect(() => {
     handleSubmitClickRef.current = handleSubmitClick;
   });
 
-  // ESC to close, Ctrl/Cmd + Enter to submit
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -500,14 +506,25 @@ export function RatingModal({
           onClose();
         }
       }
+
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
         handleSubmitClickRef.current();
       }
+
+      // Navigation Shortcuts
+      if (e.altKey && e.key === "ArrowLeft") {
+        e.preventDefault();
+        if (hasPrev) onNavigate("prev");
+      }
+      if (e.altKey && e.key === "ArrowRight") {
+        e.preventDefault();
+        if (hasNext) onNavigate("next");
+      }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [showOrientationDialog, onClose]);
+  }, [showOrientationDialog, onClose, hasPrev, hasNext, onNavigate]);
 
   const handleCopyOriginal = () => {
     navigator.clipboard.writeText(originalComment);
@@ -553,7 +570,6 @@ export function RatingModal({
     }
   };
 
-  // --- NEW: Trigger the split screen extension ---
   const handleOpenSplit = (e: MouseEvent) => {
     e.preventDefault();
     window.postMessage({ type: "OPEN_VIDEO_IN_SPLIT", url: row.link }, "*");
@@ -618,6 +634,21 @@ export function RatingModal({
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* Auto-next toggle inside modal */}
+            <button
+              type="button"
+              onClick={() => setAutoNext(!autoNext)}
+              title={autoNext ? "Auto-next is on" : "Auto-next is off"}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
+                autoNext
+                  ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+              }`}
+            >
+              <Zap size={13} className={autoNext ? "fill-blue-600/20" : ""} />
+              <span className="hidden sm:inline">Auto-next</span>
+            </button>
+
             {row.link && (
               <a
                 href={row.link}
@@ -1093,33 +1124,58 @@ export function RatingModal({
 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between gap-3 bg-slate-50/50 rounded-b-2xl flex-wrap">
-          <span
-            className={`text-xs font-medium ${complete ? "text-emerald-600" : "text-slate-400"}`}
-            style={{ fontFamily: FONT_UI }}
-          >
-            {complete
-              ? "✓ All fields complete"
-              : "Fill in every field to submit"}
-          </span>
-          <div className="flex items-center gap-2">
+          {/* LEFT SIDE: Prev / Next Navigation */}
+          <div className="flex items-center gap-1">
             <button
-              onClick={onClose}
-              style={{ fontFamily: FONT_UI }}
-              className="px-4 py-2 rounded-lg cursor-pointer text-sm font-medium text-slate-500 hover:bg-slate-100 transition-colors"
+              onClick={() => onNavigate("prev")}
+              disabled={!hasPrev}
+              title="Previous Session (Alt+Left)"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              Cancel
+              <ChevronLeft size={14} />
+              <span className="hidden sm:inline">Prev</span>
             </button>
             <button
-              onClick={handleSubmitClick}
-              style={{ fontFamily: FONT_UI }}
-              className={`px-4 py-2 rounded-lg text-sm cursor-pointer font-semibold transition-colors ${
-                isCrosscheck || complete
-                  ? "bg-blue-600 text-white hover:bg-blue-700 shadow-sm shadow-blue-600/20 border-transparent"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-blue-600 border border-slate-300"
-              }`}
+              onClick={() => onNavigate("next")}
+              disabled={!hasNext}
+              title="Next Session (Alt+Right)"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {isCrosscheck ? "Save crosscheck" : "Submit review"}
+              <span className="hidden sm:inline">Next</span>
+              <ChevronRight size={14} />
             </button>
+          </div>
+
+          {/* RIGHT SIDE: Status + Actions */}
+          <div className="flex items-center gap-4 flex-wrap">
+            <span
+              className={`text-xs font-medium hidden sm:block ${complete ? "text-emerald-600" : "text-slate-400"}`}
+              style={{ fontFamily: FONT_UI }}
+            >
+              {complete
+                ? "✓ All fields complete"
+                : "Fill in every field to submit"}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onClose}
+                style={{ fontFamily: FONT_UI }}
+                className="px-4 py-2 rounded-lg cursor-pointer text-sm font-medium text-slate-500 hover:bg-slate-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmitClick}
+                style={{ fontFamily: FONT_UI }}
+                className={`px-4 py-2 rounded-lg text-sm cursor-pointer font-semibold transition-colors ${
+                  isCrosscheck || complete
+                    ? "bg-blue-600 text-white hover:bg-blue-700 shadow-sm shadow-blue-600/20 border-transparent"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-blue-600 border border-slate-300"
+                }`}
+              >
+                {isCrosscheck ? "Save crosscheck" : "Submit review"}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1168,7 +1224,6 @@ export function RatingModal({
               <button
                 onClick={() => {
                   setShowMidciDialog(false);
-                  // Proceed without opening link
                   onSubmit(rating, systemRating, faceVisible);
                 }}
                 className="px-4 py-2 rounded-lg text-sm font-medium text-slate-500 hover:bg-slate-100 transition-colors"
@@ -1178,12 +1233,10 @@ export function RatingModal({
               <button
                 onClick={() => {
                   setShowMidciDialog(false);
-                  // Open link in split view instead of new tab
                   window.postMessage(
                     { type: "OPEN_VIDEO_IN_SPLIT", url: row.link },
                     "*",
                   );
-                  // Then submit
                   onSubmit(rating, systemRating, faceVisible);
                 }}
                 className="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm shadow-blue-600/20"

@@ -89,7 +89,7 @@ export function isRatingComplete(rating: Ratings | undefined): boolean {
 export function generateComment(
   rating: Ratings,
   faceVisible: boolean,
-  excludeCameraAndFov: boolean = false, // new parameter
+  excludeCameraAndFov: boolean = false,
 ): string {
   const parts: string[] = [];
   let hasAnyField = false;
@@ -103,6 +103,13 @@ export function generateComment(
     idle: "Idle",
   };
 
+  const handVisibilityComments: Record<string, string> = {
+    minor:
+      "Minor Hand visibility issue - hand/s not visible in frame more than 30% of the time.",
+    major:
+      "Major Hand visibility issue - hand/s not visible in frame more than 50% of the time.",
+  };
+
   SEVERITY_FIELDS.forEach(({ key }) => {
     // Skip cameraAngle and fovFraming if excluded
     if (
@@ -114,9 +121,21 @@ export function generateComment(
     const val = rating[key];
     if (!val) return;
     hasAnyField = true;
-    if (val !== "No issue") {
-      parts.push(`${val} ${fieldLabels[key]} issue`);
+    if (val === "No issue") return;
+
+    if (key === "handVisibility") {
+      const severity = val.trim().toLowerCase();
+      const comment = handVisibilityComments[severity];
+      if (comment) {
+        parts.push(comment);
+      } else {
+        // Fallback for unexpected values
+        parts.push(`${val} Hand visibility issue`);
+      }
+      return;
     }
+
+    parts.push(`${val} ${fieldLabels[key]} issue`);
   });
 
   if (rating.seated && rating.seated !== "Standing/ Moving") {
@@ -150,7 +169,6 @@ export function generateComment(
   if (excludeCameraAndFov) {
     // Avoid duplicate note
     if (!parts.some((p) => p.includes("Wrong camera orientation"))) {
-      // Ensure we have at least something to show
       parts.push("Wrong camera orientation");
       hasAnyField = true;
     }

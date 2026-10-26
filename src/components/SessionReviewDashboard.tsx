@@ -11,6 +11,7 @@ import {
   UserPlus,
   LocateFixed,
   XCircle,
+  Send,
 } from "lucide-react";
 import { SessionRow, Ratings } from "../utilities/types";
 import { FONT_DISPLAY, FONT_UI, FONT_DATA } from "../utilities/constants";
@@ -218,33 +219,47 @@ export function SessionReviewDashboard() {
 
   const hoveredRating = hoveredRowId ? ratings[hoveredRowId] : undefined;
 
-  // ----- Stats & progress -----
+  // ----- Stats & progress (5 statuses) -----
+  // Priority: submitted > failed > reviewed > inProgress > pending.
+  // Submitted/failed are terminal states set by the auto-rater, so they win
+  // over whatever the local rating object currently says.
   const stats = useMemo(() => {
     let submitted = 0;
     let failed = 0;
-    let drafted = 0;
+    let reviewed = 0;
+    let inProgress = 0;
     let pending = 0;
 
     rows.forEach((row) => {
       const rating = ratings[row.sessionId];
       if (row.submitted === true) submitted++;
       else if (row.submitted === false) failed++;
-      else if (rating && !isRatingEmpty(rating)) drafted++;
+      else if (rating && isRatingComplete(rating)) reviewed++;
+      else if (rating && !isRatingEmpty(rating)) inProgress++;
       else pending++;
     });
 
-    return { total: rows.length, submitted, failed, drafted, pending };
+    return {
+      total: rows.length,
+      submitted,
+      failed,
+      reviewed,
+      inProgress,
+      pending,
+    };
   }, [rows, ratings]);
 
   const {
     total: totalCount,
     submitted: submittedCount,
     failed: failedCount,
-    drafted: draftedCount,
+    reviewed: reviewedCount,
+    inProgress: inProgressCount,
     pending: pendingCount,
   } = stats;
 
-  const handledCount = submittedCount + failedCount + draftedCount;
+  const handledCount =
+    submittedCount + failedCount + reviewedCount + inProgressCount;
   const pct = (n: number) => (totalCount ? (n / totalCount) * 100 : 0);
   const handledPct = Math.round(pct(handledCount));
 
@@ -257,9 +272,15 @@ export function SessionReviewDashboard() {
     },
     { key: "failed", label: "Failed", count: failedCount, bar: "bg-rose-500" },
     {
-      key: "drafted",
-      label: "Drafted",
-      count: draftedCount,
+      key: "reviewed",
+      label: "Reviewed",
+      count: reviewedCount,
+      bar: "bg-violet-500",
+    },
+    {
+      key: "inProgress",
+      label: "In progress",
+      count: inProgressCount,
       bar: "bg-blue-500",
     },
     {
@@ -273,8 +294,10 @@ export function SessionReviewDashboard() {
   const statusTabs = [
     { key: "All", label: "All", count: totalCount },
     { key: "Pending", label: "Pending", count: pendingCount },
-    { key: "In progress", label: "Drafted", count: draftedCount },
-    { key: "Rated", label: "Submitted", count: submittedCount },
+    { key: "In progress", label: "In progress", count: inProgressCount },
+    { key: "Reviewed", label: "Reviewed", count: reviewedCount },
+    { key: "Submitted", label: "Submitted", count: submittedCount },
+    { key: "Failed", label: "Failed", count: failedCount },
   ];
 
   return (
@@ -331,7 +354,7 @@ export function SessionReviewDashboard() {
             </div>
           </div>
 
-          {/* Progress — one bar, one legend, no card */}
+          {/* Progress — one bar, five-segment legend */}
           <div>
             <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 mb-2.5">
               <p className="text-sm text-slate-600">
@@ -387,7 +410,6 @@ export function SessionReviewDashboard() {
             </div>
           </div>
 
-          {/* Daily tracker — collapsed by default is a single quiet line */}
           <DailyTracker days={14} />
         </header>
 
@@ -397,7 +419,7 @@ export function SessionReviewDashboard() {
           style={{ top: APP_NAV_OFFSET }}
         >
           <div className="flex flex-col md:flex-row md:items-center gap-3">
-            {/* Status segmented control */}
+            {/* Status segmented control — 5 states + All */}
             <div
               role="group"
               aria-label="Filter by review status"
@@ -564,27 +586,12 @@ export function SessionReviewDashboard() {
                       {formatTimestamp(row.uploadedTimestamp)}
                     </td>
                     <td className="px-5 py-4">
-                      {isSubmitted ? (
-                        <span className="inline-flex items-center gap-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap">
-                          <CheckCircle2 size={13} /> Reviewed
-                        </span>
-                      ) : isFailed ? (
-                        <span className="inline-flex items-center gap-1.5 text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap">
-                          <XCircle size={13} /> Failed
-                        </span>
-                      ) : isRated ? (
-                        <span className="inline-flex items-center gap-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap">
-                          <CheckCircle2 size={13} /> Reviewed
-                        </span>
-                      ) : hasRating ? (
-                        <span className="inline-flex items-center gap-1.5 text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap">
-                          <AlertTriangle size={13} /> In progress
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 text-slate-500 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap">
-                          <Circle size={13} /> Pending
-                        </span>
-                      )}
+                      <StatusBadge
+                        isSubmitted={isSubmitted}
+                        isFailed={isFailed}
+                        isRated={isRated}
+                        hasRating={hasRating}
+                      />
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center justify-end gap-2 whitespace-nowrap">
@@ -712,27 +719,13 @@ export function SessionReviewDashboard() {
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
-                    {isSubmitted ? (
-                      <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-full text-[11px] font-medium">
-                        <CheckCircle2 size={12} /> Reviewed
-                      </span>
-                    ) : isFailed ? (
-                      <span className="inline-flex items-center gap-1 text-rose-700 bg-rose-50 border border-rose-200 px-2 py-1 rounded-full text-[11px] font-medium">
-                        <XCircle size={12} /> Failed
-                      </span>
-                    ) : isRated ? (
-                      <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-full text-[11px] font-medium">
-                        <CheckCircle2 size={12} /> Reviewed
-                      </span>
-                    ) : hasRating ? (
-                      <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full text-[11px] font-medium">
-                        <AlertTriangle size={12} /> In progress
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-slate-500 bg-slate-100 border border-slate-200 px-2 py-1 rounded-full text-[11px] font-medium">
-                        <Circle size={12} /> Pending
-                      </span>
-                    )}
+                    <StatusBadge
+                      isSubmitted={isSubmitted}
+                      isFailed={isFailed}
+                      isRated={isRated}
+                      hasRating={hasRating}
+                      compact
+                    />
                   </div>
                 </div>
                 <div
@@ -886,6 +879,73 @@ export function SessionReviewDashboard() {
         </div>
       )}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Status badge — single source of truth for the 5 review states      */
+/* ------------------------------------------------------------------ */
+
+function StatusBadge({
+  isSubmitted,
+  isFailed,
+  isRated,
+  hasRating,
+  compact = false,
+}: {
+  isSubmitted: boolean;
+  isFailed: boolean;
+  isRated: boolean;
+  hasRating: boolean;
+  compact?: boolean;
+}) {
+  const size = compact ? 12 : 13;
+  const base = compact
+    ? "inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium whitespace-nowrap"
+    : "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap";
+
+  if (isSubmitted) {
+    return (
+      <span
+        className={`${base} text-emerald-700 bg-emerald-50 border border-emerald-200`}
+      >
+        <Send size={size} /> Submitted
+      </span>
+    );
+  }
+  if (isFailed) {
+    return (
+      <span
+        className={`${base} text-rose-700 bg-rose-50 border border-rose-200`}
+      >
+        <XCircle size={size} /> Failed
+      </span>
+    );
+  }
+  if (isRated) {
+    return (
+      <span
+        className={`${base} text-violet-700 bg-violet-50 border border-violet-200`}
+      >
+        <CheckCircle2 size={size} /> Reviewed
+      </span>
+    );
+  }
+  if (hasRating) {
+    return (
+      <span
+        className={`${base} text-amber-700 bg-amber-50 border border-amber-200`}
+      >
+        <AlertTriangle size={size} /> In progress
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`${base} text-slate-500 bg-slate-100 border border-slate-200`}
+    >
+      <Circle size={size} /> Pending
+    </span>
   );
 }
 

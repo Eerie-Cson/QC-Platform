@@ -99,19 +99,30 @@ export function useSessions({
         systemMatch = row.systemRating === filters.systemRating;
       }
 
-      // Review status logic
+      // Review status logic — 5-state model.
+      // Priority MUST match the stats bucketing in SessionReviewDashboard:
+      //   Submitted  >  Failed  >  Reviewed  >  In progress  >  Pending
+      // Submitted/Failed are terminal states set by the auto-rater and
+      // therefore always win over whatever the local rating object says.
       let statusMatch = true;
       const isEmpty = isRatingEmpty(rating);
       const isComplete = isRatingComplete(rating);
-      const isSubmitted = row.submitted === true; // NEW: Check submitted flag
+      const isSubmitted = row.submitted === true;
+      const isFailed = row.submitted === false;
+      const isUnclaimed = !isSubmitted && !isFailed; // auto-rater hasn't touched it
 
-      if (filters.reviewStatus === "Rated") {
-        statusMatch = isSubmitted; // Only show if fully submitted
+      if (filters.reviewStatus === "Submitted") {
+        statusMatch = isSubmitted;
+      } else if (filters.reviewStatus === "Failed") {
+        statusMatch = isFailed;
+      } else if (filters.reviewStatus === "Reviewed") {
+        statusMatch = isUnclaimed && !isEmpty && isComplete;
       } else if (filters.reviewStatus === "In progress") {
-        statusMatch = !isEmpty && !isComplete;
+        statusMatch = isUnclaimed && !isEmpty && !isComplete;
       } else if (filters.reviewStatus === "Pending") {
-        statusMatch = isEmpty;
+        statusMatch = isUnclaimed && isEmpty;
       }
+      // filters.reviewStatus === "All" → statusMatch stays true
 
       // Search by task name OR email – case-insensitive
       const taskMatch =
@@ -226,16 +237,16 @@ export function useSessions({
   }, [exportEndpoint]);
 
   // ---------- reviewedCount ----------
-  // STRICT SOURCE OF TRUTH: Only count if the auto-rater pushed it
+  // "Fully rated, regardless of submission outcome" — i.e. everything that
+  // is no longer Pending or In progress. Bucketed in the same priority order
+  // as the dashboard: Submitted > Failed > Reviewed > In progress > Pending.
   const reviewedCount = useMemo(
     () =>
       rows.filter((r) => {
-        // 1. If the auto-rater successfully submitted it, it's reviewed.
-        if (r.submitted === true) return true;
-
-        // 2. If all rating fields are filled out in the UI, it's reviewed.
+        if (r.submitted === true) return true; // submitted
+        if (r.submitted === false) return true; // failed submission (still fully rated)
         const rating = ratings[r.sessionId];
-        return rating !== undefined && isRatingComplete(rating);
+        return rating !== undefined && isRatingComplete(rating); // reviewed, not yet submitted
       }).length,
     [rows, ratings],
   );

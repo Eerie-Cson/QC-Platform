@@ -1,5 +1,5 @@
 // components/RatingModal.tsx
-import { useState, useEffect, useRef, MouseEvent } from "react";
+import { useState, useEffect, useRef, MouseEvent, ReactNode } from "react";
 import {
   X,
   Copy,
@@ -13,7 +13,6 @@ import {
   ExternalLink,
   UserPlus,
   Trash2,
-  Zap,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -53,6 +52,74 @@ import {
 } from "../utilities/utils";
 
 // ---------------------------------------------------------------------------
+// Small shared pieces
+// ---------------------------------------------------------------------------
+const FIELD_LABEL = "block text-xs font-medium text-slate-500";
+const FOCUS_RING =
+  "cursor-pointer disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40";
+const TEXT_INPUT =
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-400 transition-colors";
+
+function Notice({
+  tone,
+  children,
+}: {
+  tone: "amber" | "rose";
+  children: ReactNode;
+}) {
+  const styles =
+    tone === "amber"
+      ? "bg-amber-50 border-amber-200 text-amber-800"
+      : "bg-rose-50 border-rose-200 text-rose-800";
+  return (
+    <div
+      role="alert"
+      className={`flex items-start gap-2 px-3 py-2 rounded-lg border text-sm ${styles}`}
+    >
+      <AlertTriangle size={15} className="shrink-0 mt-0.5" />
+      <span>{children}</span>
+    </div>
+  );
+}
+
+function ConfirmDialog({
+  title,
+  children,
+  actions,
+  labelId,
+}: {
+  title: string;
+  children: ReactNode;
+  actions: ReactNode;
+  labelId: string;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/40">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={labelId}
+        className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 border border-slate-200"
+        style={{ fontFamily: FONT_UI }}
+      >
+        <h3
+          id={labelId}
+          className="text-[15px] font-semibold text-slate-900"
+          style={{ fontFamily: FONT_DISPLAY }}
+        >
+          {title}
+        </h3>
+        <p className="text-sm text-slate-600 mt-2">{children}</p>
+        <div className="flex justify-end gap-2 mt-6">{actions}</div>
+      </div>
+    </div>
+  );
+}
+
+const BTN_GHOST = `px-3.5 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors ${FOCUS_RING}`;
+const BTN_PRIMARY = `px-3.5 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 transition-colors shadow-sm shadow-blue-600/20 ${FOCUS_RING}`;
+
+// ---------------------------------------------------------------------------
 // DropdownField – compact version for crosscheck
 // ---------------------------------------------------------------------------
 interface DropdownFieldProps<T extends string> {
@@ -74,11 +141,8 @@ function DropdownField<T extends string>({
     value && styleMap[value] ? styleMap[value] : "border-slate-200 bg-white";
 
   return (
-    <div className="space-y-0.5">
-      <label
-        className="text-[10px] font-semibold uppercase tracking-wider text-slate-400"
-        style={{ fontFamily: FONT_UI }}
-      >
+    <div className="space-y-1">
+      <label className={FIELD_LABEL} style={{ fontFamily: FONT_UI }}>
         {label}
       </label>
       <select
@@ -87,7 +151,7 @@ function DropdownField<T extends string>({
           const val = e.target.value;
           onChange(val === "" ? undefined : (val as T));
         }}
-        className={`w-full rounded border px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-600/15 focus:border-blue-400 transition-colors ${selectedClass}`}
+        className={`w-full cursor-pointer rounded-lg border px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-400 transition-colors ${selectedClass}`}
         style={{ fontFamily: FONT_UI }}
       >
         <option value="">–</option>
@@ -220,6 +284,7 @@ export function RatingModal({
   const isApproved = crosscheckComment === "Ok";
 
   const isLinkMismatch = !row.link.endsWith(row.sessionId);
+  const hasAlerts = !!(row.duplicate || isLinkMismatch || row.personalGmail);
 
   // Auto‑show comment box if there's a non‑"Ok" custom comment
   useEffect(() => {
@@ -575,143 +640,101 @@ export function RatingModal({
     window.postMessage({ type: "OPEN_VIDEO_IN_SPLIT", url: row.link }, "*");
   };
 
+  const sectionDivider = "pt-5 border-t border-slate-100";
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4">
-      <div className="w-full sm:max-w-2xl bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl max-h-[95vh] flex flex-col border border-slate-200/60">
-        {/* Header */}
-        <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
-          <div className="min-w-0">
-            <p
-              className="text-[10px] font-semibold uppercase tracking-wider text-blue-600"
-              style={{ fontFamily: FONT_UI }}
-            >
-              {isCrosscheck ? "Crosscheck video" : "Rate video"}
-            </p>
-            <div className="flex items-center gap-2 mt-0.5">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 p-0 sm:p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rating-modal-title"
+        className="w-full sm:max-w-2xl bg-white rounded-t-2xl sm:rounded-2xl shadow-xl max-h-[95vh] flex flex-col border border-slate-200"
+        style={{ fontFamily: FONT_UI }}
+      >
+        {/* ───────── Header ───────── */}
+        <div className="px-6 py-4 border-b border-slate-100 flex flex-col gap-3">
+          {/* Title Row */}
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
               <h2
-                className="text-lg font-semibold text-slate-900 tracking-tight truncate"
+                id="rating-modal-title"
+                className="text-lg font-semibold text-slate-900 tracking-tight break-words"
                 style={{ fontFamily: FONT_DISPLAY }}
               >
                 {row.task}
               </h2>
               {row.new && (
                 <span
-                  className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded shrink-0"
+                  className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wider text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded shrink-0"
                   title="This session comes from a newly-created account"
                 >
-                  <UserPlus size={10} /> New account
+                  <UserPlus size={11} /> New account
                 </span>
               )}
               {row.duplicate && (
                 <span
-                  className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shrink-0"
+                  className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wider text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shrink-0"
                   title="This sessionId appeared more than once in the QC input"
                 >
-                  <Copy size={10} /> Duplicate
+                  <Copy size={11} /> Duplicate
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <p
-                className="text-xs text-slate-400 truncate"
-                style={{ fontFamily: FONT_DATA }}
-              >
-                {row.email} · {row.sessionId}
-              </p>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              {row.link && (
+                <a
+                  href={row.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={handleOpenSplit}
+                  title="Open session link in split view"
+                  className={`inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 bg-white border border-slate-200 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-colors cursor-pointer ${FOCUS_RING}`}
+                >
+                  <ExternalLink size={15} />
+                </a>
+              )}
               <button
-                type="button"
-                onClick={handleCopySessionId}
-                title={copiedSessionId ? "Copied!" : "Copy session ID"}
-                aria-label="Copy session ID"
-                className={`shrink-0 inline-flex items-center justify-center w-5 h-5 rounded transition-colors cursor-pointer ${
-                  copiedSessionId
-                    ? "text-emerald-600 bg-emerald-50"
-                    : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-                }`}
+                onClick={onClose}
+                className={`text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg p-1.5 transition-colors ${FOCUS_RING}`}
+                aria-label="Close"
               >
-                {copiedSessionId ? <Check size={12} /> : <Copy size={12} />}
+                <X size={18} />
               </button>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            {/* Auto-next toggle inside modal */}
-            <button
-              type="button"
-              onClick={() => setAutoNext(!autoNext)}
-              title={autoNext ? "Auto-next is on" : "Auto-next is off"}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
-                autoNext
-                  ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
-                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-              }`}
-            >
-              <Zap size={13} className={autoNext ? "fill-blue-600/20" : ""} />
-              <span className="hidden sm:inline">Auto-next</span>
-            </button>
 
-            {row.link && (
-              <a
-                href={row.link}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={handleOpenSplit}
-                title="Open session link in split view"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors cursor-pointer"
-                style={{ fontFamily: FONT_UI }}
-              >
-                <ExternalLink size={13} />
-                <span className="hidden sm:inline">Open session</span>
-              </a>
-            )}
-            <button
-              onClick={onClose}
-              className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg p-1.5 transition-colors shrink-0"
-              aria-label="Close"
-            >
-              <X size={18} />
-            </button>
-          </div>
-        </div>
-
-        {/* Body */}
-        <div className="px-5 py-4 overflow-y-auto space-y-4">
-          {row.duplicate && (
-            <div className="flex items-start gap-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
-              <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-              <span>
-                This session appeared more than once. Double-check the task and
-                session ID before rating.
-              </span>
+          {/* Meta + System Rating Row */}
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+            <div className="min-w-0 flex flex-col gap-1">
+              <p className="text-xs text-slate-500 break-all">{row.email}</p>
+              <div className="flex items-start gap-1.5">
+                <p
+                  className="text-xs text-slate-400 break-all"
+                  style={{ fontFamily: FONT_DATA }}
+                >
+                  {row.sessionId}
+                </p>
+                <button
+                  type="button"
+                  onClick={handleCopySessionId}
+                  title={copiedSessionId ? "Copied" : "Copy session ID"}
+                  aria-label="Copy session ID"
+                  className={`shrink-0 -mt-0.5 inline-flex items-center justify-center w-6 h-6 rounded-md transition-colors ${FOCUS_RING} ${
+                    copiedSessionId
+                      ? "text-emerald-600 bg-emerald-50"
+                      : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  {copiedSessionId ? <Check size={12} /> : <Copy size={12} />}
+                </button>
+              </div>
             </div>
-          )}
 
-          {isLinkMismatch && (
-            <div className="flex items-start gap-2 p-2 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-sm">
-              <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-              <span>
-                Session ID does not appear in the link. Verify correct video.
+            <div className="flex flex-col gap-1.5 shrink-0">
+              <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
+                System rating
               </span>
-            </div>
-          )}
-
-          {row.personalGmail && (
-            <div className="flex items-start gap-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
-              <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-              <span>
-                This session uses a personal Gmail account. Skip this session!
-              </span>
-            </div>
-          )}
-
-          {/* System rating – compact */}
-          <div>
-            <span
-              className="text-[10px] font-semibold uppercase tracking-wider text-slate-400"
-              style={{ fontFamily: FONT_UI }}
-            >
-              System rating
-            </span>
-            <div className="mt-1">
               <PillSegmentedField<SystemRating>
                 options={Object.values(SystemRating)}
                 value={(systemRating as SystemRating) || SystemRating.None}
@@ -722,29 +745,50 @@ export function RatingModal({
               />
             </div>
           </div>
+        </div>
 
-          <hr className="border-slate-100" />
+        {/* ───────── Body ───────── */}
+        <div className="px-6 py-5 overflow-y-auto space-y-5">
+          {hasAlerts && (
+            <div className="space-y-2">
+              {row.duplicate && (
+                <Notice tone="amber">
+                  This session appeared more than once. Double-check the task
+                  and session ID before rating.
+                </Notice>
+              )}
+              {isLinkMismatch && (
+                <Notice tone="rose">
+                  Session ID does not appear in the link. Verify correct video.
+                </Notice>
+              )}
+              {row.personalGmail && (
+                <Notice tone="amber">
+                  This session uses a personal Gmail account. Skip this session!
+                </Notice>
+              )}
+            </div>
+          )}
 
-          {/* REVIEW MODE – compact 2‑column layout */}
+          {/* ============================================================ */}
+          {/* REVIEW MODE */}
+          {/* ============================================================ */}
           {!isCrosscheck && (
             <>
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <p
-                    className="text-[10px] font-semibold uppercase tracking-wider text-slate-400"
-                    style={{ fontFamily: FONT_UI }}
-                  >
+              <div className={hasAlerts ? sectionDivider : ""}>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-slate-800">
                     Video quality
-                  </p>
+                  </h3>
 
                   {isRatingEmpty(rating) ? (
                     <button
                       type="button"
                       onClick={handleSetAllNoIssue}
                       title="Set all fields to No issue"
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-full transition-colors cursor-pointer"
+                      className={`inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer ${FOCUS_RING}`}
                     >
-                      <CheckCheck size={13} />
+                      <CheckCheck size={14} />
                       Mark all no issue
                     </button>
                   ) : (
@@ -752,14 +796,14 @@ export function RatingModal({
                       type="button"
                       onClick={handleClearRating}
                       title="Clear all rating fields"
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2.5 py-1 rounded-full transition-colors cursor-pointer"
+                      className={`inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-rose-700 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer ${FOCUS_RING}`}
                     >
-                      <Trash2 size={13} />
+                      <Trash2 size={14} />
                       Clear rating
                     </button>
                   )}
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
                   {SEVERITY_FIELDS.map((f) => (
                     <SegmentedField<Severity>
                       key={f.key}
@@ -775,76 +819,79 @@ export function RatingModal({
                 </div>
               </div>
 
-              <hr className="border-slate-100" />
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
-                <SegmentedField<Seated>
-                  label="Seated?"
-                  options={SEATED_OPTIONS}
-                  value={rating.seated || undefined}
-                  onChange={(v) => update("seated", v || "")}
-                  styleMap={SEATED_STYLE_MAP}
-                  disabled={false}
-                  compact
-                />
-
-                <SegmentedField<Environment>
-                  label="Environment"
-                  options={ENVIRONMENT_OPTIONS}
-                  value={rating.environment || undefined}
-                  onChange={(v) => update("environment", v || "")}
-                  styleMap={ENVIRONMENT_STYLE_MAP}
-                  disabled={false}
-                  compact
-                />
-
-                <div className="sm:col-span-2">
-                  <SegmentedField<Other>
-                    label="Other"
-                    options={OTHER_OPTIONS}
-                    value={rating.other || undefined}
-                    onChange={(v) => update("other", v || "")}
-                    tone="severity"
+              <div className={sectionDivider}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-3">
+                  Session details
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                  <SegmentedField<Seated>
+                    label="Seated?"
+                    options={SEATED_OPTIONS}
+                    value={rating.seated || undefined}
+                    onChange={(v) => update("seated", v || "")}
+                    styleMap={SEATED_STYLE_MAP}
+                    disabled={false}
                     compact
                   />
-                </div>
 
-                <div className="sm:col-span-2 space-y-1.5">
-                  <span
-                    className="text-[10px] font-semibold uppercase tracking-wider text-slate-400"
-                    style={{ fontFamily: FONT_UI }}
-                  >
+                  <SegmentedField<Environment>
+                    label="Environment"
+                    options={ENVIRONMENT_OPTIONS}
+                    value={rating.environment || undefined}
+                    onChange={(v) => update("environment", v || "")}
+                    styleMap={ENVIRONMENT_STYLE_MAP}
+                    disabled={false}
+                    compact
+                  />
+
+                  <div className="sm:col-span-2">
+                    <SegmentedField<Other>
+                      label="Other"
+                      options={OTHER_OPTIONS}
+                      value={rating.other || undefined}
+                      onChange={(v) => update("other", v || "")}
+                      tone="severity"
+                      compact
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className={`${sectionDivider} space-y-3`}>
+                <div className="space-y-1.5">
+                  <label htmlFor="rating-comment" className={FIELD_LABEL}>
                     Comments
-                  </span>
+                  </label>
                   <textarea
+                    id="rating-comment"
                     ref={commentRef}
                     value={rating.comment || ""}
                     onChange={(e) => update("comment", e.target.value)}
-                    placeholder="Add any additional notes..."
+                    placeholder="Add any additional notes…"
                     style={{ fontFamily: FONT_UI }}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-600/15 focus:border-blue-400 resize-y min-h-[40px]"
+                    className={`${TEXT_INPUT} resize-y min-h-[40px]`}
                     rows={2}
                   />
                 </div>
 
-                <div className="sm:col-span-2 flex flex-wrap items-center justify-end gap-3 pt-1">
-                  <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-x-5 gap-y-2">
+                  <label
+                    htmlFor="slowLoading"
+                    className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none"
+                  >
                     <input
                       type="checkbox"
                       id="slowLoading"
                       checked={rating.slowLoading || false}
                       onChange={(e) => update("slowLoading", e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      className="w-4 h-4 cursor-pointer rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                     />
-                    <label
-                      htmlFor="slowLoading"
-                      className="text-sm text-slate-600 cursor-pointer select-none"
-                      style={{ fontFamily: FONT_UI }}
-                    >
-                      Slow loading
-                    </label>
-                  </div>
-                  <div className="flex items-center gap-2">
+                    Slow loading
+                  </label>
+                  <label
+                    htmlFor="faceVisible"
+                    className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none"
+                  >
                     <input
                       type="checkbox"
                       id="faceVisible"
@@ -852,16 +899,10 @@ export function RatingModal({
                       onChange={(e) =>
                         handleFaceVisibleChange(e.target.checked)
                       }
-                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      className="w-4 h-4 cursor-pointer rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                     />
-                    <label
-                      htmlFor="faceVisible"
-                      className="text-sm text-slate-600 cursor-pointer select-none"
-                      style={{ fontFamily: FONT_UI }}
-                    >
-                      Faces visible
-                    </label>
-                  </div>
+                    Faces visible
+                  </label>
                 </div>
               </div>
             </>
@@ -872,14 +913,11 @@ export function RatingModal({
           {/* ============================================================ */}
           {isCrosscheck && (
             <>
-              <div>
-                <p
-                  className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-2"
-                  style={{ fontFamily: FONT_UI }}
-                >
+              <div className={hasAlerts ? sectionDivider : ""}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-3">
                   Video quality
-                </p>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                </h3>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                   {SEVERITY_FIELDS.map((f) => (
                     <DropdownField<Severity>
                       key={f.key}
@@ -893,65 +931,69 @@ export function RatingModal({
                 </div>
               </div>
 
-              <hr className="border-slate-100" />
+              <div className={sectionDivider}>
+                <h3 className="text-sm font-semibold text-slate-800 mb-3">
+                  Session details
+                </h3>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                  <DropdownField<Seated>
+                    label="Seated?"
+                    options={SEATED_OPTIONS}
+                    value={rating.seated || undefined}
+                    onChange={(v) => update("seated", v || "")}
+                    styleMap={SEATED_DROPDOWN_STYLES}
+                  />
 
-              <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                <DropdownField<Seated>
-                  label="Seated?"
-                  options={SEATED_OPTIONS}
-                  value={rating.seated || undefined}
-                  onChange={(v) => update("seated", v || "")}
-                  styleMap={SEATED_DROPDOWN_STYLES}
-                />
+                  <DropdownField<Environment>
+                    label="Environment"
+                    options={ENVIRONMENT_OPTIONS}
+                    value={rating.environment || undefined}
+                    onChange={(v) => update("environment", v || "")}
+                    styleMap={ENVIRONMENT_DROPDOWN_STYLES}
+                  />
 
-                <DropdownField<Environment>
-                  label="Environment"
-                  options={ENVIRONMENT_OPTIONS}
-                  value={rating.environment || undefined}
-                  onChange={(v) => update("environment", v || "")}
-                  styleMap={ENVIRONMENT_DROPDOWN_STYLES}
-                />
-
-                <DropdownField<Other>
-                  label="Other"
-                  options={OTHER_OPTIONS}
-                  value={rating.other || undefined}
-                  onChange={(v) => update("other", v || "")}
-                  styleMap={OTHER_DROPDOWN_STYLES}
-                />
+                  <DropdownField<Other>
+                    label="Other"
+                    options={OTHER_OPTIONS}
+                    value={rating.other || undefined}
+                    onChange={(v) => update("other", v || "")}
+                    styleMap={OTHER_DROPDOWN_STYLES}
+                  />
+                </div>
               </div>
 
               {/* Original QC comment block */}
               {originalComment && (
-                <div className="bg-slate-50 rounded border border-slate-200 p-2">
+                <div className="bg-slate-50 rounded-xl border border-slate-200 p-3">
                   <div className="flex items-center justify-between flex-wrap gap-2">
-                    <span
-                      className="text-[10px] font-semibold uppercase tracking-wider text-slate-400"
-                      style={{ fontFamily: FONT_UI }}
-                    >
+                    <span className="text-sm font-medium text-slate-700">
                       Original QC comment
                     </span>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1">
                       <button
                         type="button"
                         onClick={handleCopyOriginal}
-                        className="p-1 rounded hover:bg-slate-200 text-slate-500 transition-colors cursor-pointer"
+                        className={`p-1.5 rounded-md hover:bg-slate-200 text-slate-500 transition-colors cursor-pointer ${FOCUS_RING}`}
                         title="Copy"
+                        aria-label="Copy original comment"
                       >
-                        <Copy size={13} />
+                        <Copy size={14} />
                       </button>
                       <button
                         type="button"
                         onClick={toggleOriginalVisibility}
-                        className="p-1 rounded hover:bg-slate-200 text-slate-500 transition-colors cursor-pointer"
+                        className={`p-1.5 rounded-md hover:bg-slate-200 text-slate-500 transition-colors cursor-pointer ${FOCUS_RING}`}
                         title={
+                          showOriginalComment ? "Hide comment" : "Show comment"
+                        }
+                        aria-label={
                           showOriginalComment ? "Hide comment" : "Show comment"
                         }
                       >
                         {showOriginalComment ? (
-                          <EyeOff size={13} />
+                          <EyeOff size={14} />
                         ) : (
-                          <Eye size={13} />
+                          <Eye size={14} />
                         )}
                       </button>
                       <button
@@ -966,17 +1008,20 @@ export function RatingModal({
                               : "Confirmed"
                             : "Confirm match"
                         }
-                        className="cursor-pointer"
+                        aria-label={
+                          isApproved ? "Undo confirm" : "Confirm match"
+                        }
+                        className={`cursor-pointer rounded-full ${FOCUS_RING}`}
                       >
                         <div
                           className={`relative w-6 h-6 rounded-full flex items-center justify-center overflow-hidden transition-colors ${
                             isApproved
                               ? isHoveringApproval
                                 ? "bg-rose-50"
-                                : "bg-green-100 border border-green-200"
+                                : "bg-emerald-50 border border-emerald-200"
                               : isHoveringApproval
                                 ? "bg-emerald-50"
-                                : "bg-slate-100 border border-slate-300"
+                                : "bg-white border border-slate-300"
                           }`}
                         >
                           <AnimatePresence mode="wait" initial={false}>
@@ -1012,7 +1057,7 @@ export function RatingModal({
                                 >
                                   <Check
                                     size={14}
-                                    className="text-green-800"
+                                    className="text-emerald-700"
                                     strokeWidth={2.5}
                                   />
                                 </motion.div>
@@ -1042,20 +1087,18 @@ export function RatingModal({
                   {showOriginalComment && (
                     <>
                       <p
-                        className="text-xs text-slate-700 whitespace-pre-wrap mt-1"
+                        className="text-sm text-slate-700 whitespace-pre-wrap mt-2"
                         style={{ fontFamily: FONT_UI }}
                       >
                         {originalComment}
                       </p>
 
-                      <hr className="border-slate-200 my-2" />
-
-                      <div className="flex items-center gap-3 flex-wrap">
+                      <div className="border-t border-slate-200 mt-3 pt-3 flex items-center gap-3 flex-wrap">
                         {!isApproved && (
                           <button
                             type="button"
                             onClick={toggleCommentBox}
-                            className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 underline-offset-2 hover:underline transition-colors cursor-pointer"
+                            className={`inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 rounded-md transition-colors cursor-pointer ${FOCUS_RING}`}
                           >
                             <Edit3 size={13} />
                             {crosscheckComment ? "Edit note" : "Add note"}
@@ -1065,7 +1108,7 @@ export function RatingModal({
                           <button
                             type="button"
                             onClick={handleRevoke}
-                            className="text-xs text-slate-400 hover:text-slate-600 underline-offset-2 hover:underline transition-colors cursor-pointer"
+                            className={`text-xs font-medium text-slate-500 hover:text-slate-800 rounded-md transition-colors cursor-pointer ${FOCUS_RING}`}
                           >
                             Revoke
                           </button>
@@ -1073,20 +1116,21 @@ export function RatingModal({
                       </div>
 
                       {showCommentBox && !isApproved && (
-                        <div className="mt-2 space-y-1">
+                        <div className="mt-3 space-y-1.5">
                           <div className="flex items-center justify-between">
-                            <span
-                              className="text-[10px] font-semibold uppercase tracking-wider text-slate-400"
-                              style={{ fontFamily: FONT_UI }}
+                            <label
+                              htmlFor="crosscheck-comment"
+                              className={FIELD_LABEL}
                             >
                               Your crosscheck comment
-                            </span>
-                            <div className="flex items-center gap-1.5">
+                            </label>
+                            <div className="flex items-center gap-2">
                               <button
                                 type="button"
                                 onClick={handleStrikethrough}
-                                className="p-1 rounded hover:bg-slate-100 text-slate-500 transition-colors cursor-pointer"
+                                className={`px-1.5 py-0.5 rounded-md hover:bg-slate-200 text-slate-500 transition-colors cursor-pointer ${FOCUS_RING}`}
                                 title="Toggle strikethrough"
+                                aria-label="Toggle strikethrough"
                               >
                                 <span className="font-mono text-xs font-medium">
                                   ~~
@@ -1095,21 +1139,22 @@ export function RatingModal({
                               <button
                                 type="button"
                                 onClick={toggleCommentBox}
-                                className="text-[10px] text-slate-400 hover:text-slate-600 cursor-pointer"
+                                className={`text-xs font-medium text-slate-500 hover:text-slate-800 rounded-md cursor-pointer ${FOCUS_RING}`}
                               >
                                 Cancel
                               </button>
                             </div>
                           </div>
                           <textarea
+                            id="crosscheck-comment"
                             ref={crosscheckCommentRef}
                             value={crosscheckComment}
                             onChange={(e) =>
                               update("crosscheckComment", e.target.value)
                             }
-                            placeholder="Add your review notes, strike through parts you disagree with..."
+                            placeholder="Add your review notes, strike through parts you disagree with…"
                             style={{ fontFamily: FONT_UI }}
-                            className="w-full rounded border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-600/15 focus:border-blue-400 resize-y min-h-[60px]"
+                            className={`${TEXT_INPUT} resize-y min-h-[60px]`}
                             rows={3}
                           />
                         </div>
@@ -1122,111 +1167,109 @@ export function RatingModal({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between gap-3 bg-slate-50/50 rounded-b-2xl flex-wrap">
-          {/* LEFT SIDE: Prev / Next Navigation */}
-          <div className="flex items-center gap-1">
+        {/* ───────── Footer ───────── */}
+        <div className="px-6 py-3.5 border-t border-slate-100 flex items-center justify-between gap-3 flex-wrap bg-white rounded-b-2xl">
+          {/* Navigation + auto-next (both are about moving between sessions) */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="inline-flex items-center gap-0.5 p-1 rounded-lg bg-slate-200/60">
+              <button
+                onClick={() => onNavigate("prev")}
+                disabled={!hasPrev}
+                title="Previous session (Alt+Left)"
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-sm font-medium text-slate-600 hover:bg-white hover:text-slate-900 hover:shadow-sm disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:shadow-none transition-colors ${FOCUS_RING}`}
+              >
+                <ChevronLeft size={15} />
+                <span className="hidden sm:inline">Prev</span>
+              </button>
+              <button
+                onClick={() => onNavigate("next")}
+                disabled={!hasNext}
+                title="Next session (Alt+Right)"
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-sm font-medium text-slate-600 hover:bg-white hover:text-slate-900 hover:shadow-sm disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:shadow-none transition-colors ${FOCUS_RING}`}
+              >
+                <span className="hidden sm:inline">Next</span>
+                <ChevronRight size={15} />
+              </button>
+            </div>
+
             <button
-              onClick={() => onNavigate("prev")}
-              disabled={!hasPrev}
-              title="Previous Session (Alt+Left)"
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              type="button"
+              role="switch"
+              aria-checked={autoNext}
+              onClick={() => setAutoNext(!autoNext)}
+              title="After you submit, open the next unrated session automatically"
+              className={`inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900 rounded-md ${FOCUS_RING}`}
             >
-              <ChevronLeft size={14} />
-              <span className="hidden sm:inline">Prev</span>
-            </button>
-            <button
-              onClick={() => onNavigate("next")}
-              disabled={!hasNext}
-              title="Next Session (Alt+Right)"
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <span className="hidden sm:inline">Next</span>
-              <ChevronRight size={14} />
+              <span
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                  autoNext ? "bg-blue-600" : "bg-slate-300"
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                    autoNext ? "translate-x-[18px]" : "translate-x-0.5"
+                  }`}
+                />
+              </span>
+              Auto-next
             </button>
           </div>
 
-          {/* RIGHT SIDE: Status + Actions */}
-          <div className="flex items-center gap-4 flex-wrap">
-            <span
-              className={`text-xs font-medium hidden sm:block ${complete ? "text-emerald-600" : "text-slate-400"}`}
-              style={{ fontFamily: FONT_UI }}
+          {/* Actions */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSubmitClick}
+              title="Ctrl/⌘ + Enter"
+              className={
+                isCrosscheck || complete
+                  ? BTN_PRIMARY
+                  : `px-3.5 py-2 rounded-lg text-sm font-medium bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 transition-colors ${FOCUS_RING}`
+              }
             >
-              {complete
-                ? "✓ All fields complete"
-                : "Fill in every field to submit"}
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={onClose}
-                style={{ fontFamily: FONT_UI }}
-                className="px-4 py-2 rounded-lg cursor-pointer text-sm font-medium text-slate-500 hover:bg-slate-100 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSubmitClick}
-                style={{ fontFamily: FONT_UI }}
-                className={`px-4 py-2 rounded-lg text-sm cursor-pointer font-semibold transition-colors ${
-                  isCrosscheck || complete
-                    ? "bg-blue-600 text-white hover:bg-blue-700 shadow-sm shadow-blue-600/20 border-transparent"
-                    : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-blue-600 border border-slate-300"
-                }`}
-              >
-                {isCrosscheck ? "Save crosscheck" : "Submit review"}
-              </button>
-            </div>
+              {isCrosscheck
+                ? "Save crosscheck"
+                : complete
+                  ? "Submit review"
+                  : "Save draft"}
+            </button>
           </div>
         </div>
       </div>
 
       {/* Orientation confirmation dialog (review only) */}
       {showOrientationDialog && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/70 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6 border border-slate-200">
-            <h3 className="text-lg font-semibold text-slate-900">
-              Camera orientation
-            </h3>
-            <p className="text-sm text-slate-600 mt-2">
-              It looks like both Camera Angle and FOV Framing have issues. Is
-              this due to wrong camera orientation?
-            </p>
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={handleOrientationNo}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-500 hover:bg-slate-100 transition-colors"
-              >
+        <ConfirmDialog
+          labelId="orientation-title"
+          title="Camera orientation"
+          actions={
+            <>
+              <button onClick={handleOrientationNo} className={BTN_GHOST}>
                 No, keep separate
               </button>
-              <button
-                onClick={handleOrientationYes}
-                className="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm shadow-blue-600/20"
-              >
-                Yes, it's wrong orientation
+              <button onClick={handleOrientationYes} className={BTN_PRIMARY}>
+                Yes, wrong orientation
               </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          It looks like both Camera Angle and FOV Framing have issues. Is this
+          due to wrong camera orientation?
+        </ConfirmDialog>
       )}
 
       {/* Midcitigarments major issue dialog */}
       {showMidciDialog && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/70 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6 border border-slate-200">
-            <h3 className="text-lg font-semibold text-slate-900">
-              Major Issue Detected
-            </h3>
-            <p className="text-sm text-slate-600 mt-2">
-              This session from midcitigarments has a major issue. Would you
-              like to open the video link in a new tab?
-            </p>
-            <div className="flex justify-end gap-3 mt-6">
+        <ConfirmDialog
+          labelId="midci-title"
+          title="Major issue detected"
+          actions={
+            <>
               <button
                 onClick={() => {
                   setShowMidciDialog(false);
                   onSubmit(rating, systemRating, faceVisible);
                 }}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-500 hover:bg-slate-100 transition-colors"
+                className={BTN_GHOST}
               >
                 No
               </button>
@@ -1239,13 +1282,16 @@ export function RatingModal({
                   );
                   onSubmit(rating, systemRating, faceVisible);
                 }}
-                className="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm shadow-blue-600/20"
+                className={BTN_PRIMARY}
               >
                 Yes
               </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          This session from midcitigarments has a major issue. Would you like to
+          open the video link in a new tab?
+        </ConfirmDialog>
       )}
     </div>
   );

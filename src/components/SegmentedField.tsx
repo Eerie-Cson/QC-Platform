@@ -10,7 +10,7 @@ interface SegmentedFieldProps<T extends string> {
   styleMap?: Record<string, string>;
   disabled?: boolean;
   displayMap?: Record<string, string>;
-  compact?: boolean; // ✅ new – reduces size
+  compact?: boolean;
 }
 
 export function SegmentedField<T extends string>({
@@ -28,34 +28,35 @@ export function SegmentedField<T extends string>({
     <div className="space-y-1.5">
       {label && (
         <span
-          className={`${compact ? "text-[10px]" : "text-[10.5px]"} font-semibold uppercase tracking-wider text-slate-400`}
+          className="block text-xs font-medium text-slate-500"
           style={{ fontFamily: FONT_UI }}
         >
           {label}
         </span>
       )}
-      <div className="flex flex-wrap gap-1.5">
+      <div role="group" aria-label={label} className="flex flex-wrap gap-1.5">
         {options.map((opt) => {
           const active = value === opt;
-          let activeClass = "";
+          let stateClass = "";
           if (active) {
             if (styleMap && styleMap[opt]) {
-              activeClass = `${styleMap[opt]} ring-1 ring-offset-0`;
+              stateClass = `${styleMap[opt]} ring-1 ring-offset-0`;
             } else if (tone === "severity") {
-              activeClass = `${SEVERITY_STYLES[opt as unknown as keyof typeof SEVERITY_STYLES]} ring-1 ring-offset-0`;
+              stateClass = `${SEVERITY_STYLES[opt as unknown as keyof typeof SEVERITY_STYLES]} ring-1 ring-offset-0`;
             } else {
-              activeClass =
+              stateClass =
                 "bg-blue-600 text-white border-blue-600 shadow-sm shadow-blue-600/20";
             }
           } else {
-            activeClass =
-              "bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:bg-slate-50";
+            stateClass =
+              "bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50";
           }
           const displayText = displayMap ? displayMap[opt] : opt;
           return (
             <button
               key={opt}
               type="button"
+              aria-pressed={active}
               onClick={() => {
                 if (disabled) return;
                 if (value === opt) onChange(undefined);
@@ -63,7 +64,7 @@ export function SegmentedField<T extends string>({
               }}
               disabled={disabled}
               style={{ fontFamily: FONT_UI }}
-              className={`${compact ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-[13px]"} rounded-md font-medium border transition-all duration-150 ${activeClass} ${
+              className={`${compact ? "px-3 py-1.5 text-xs" : "px-3.5 py-2 text-[13px]"} rounded-lg font-medium border transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 ${stateClass} ${
                 disabled
                   ? "opacity-40 cursor-not-allowed pointer-events-none"
                   : ""

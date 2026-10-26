@@ -19,8 +19,12 @@ export function PillSegmentedField<T extends string>({
   iconMap,
   displayMap,
 }: PillSegmentedFieldProps<T>) {
+  // Same segmented-track treatment as the dashboard's status tabs.
   return (
-    <div className="inline-flex flex-wrap items-center bg-slate-100 rounded-full p-1 gap-0.5">
+    <div
+      role="group"
+      className="inline-flex flex-wrap items-center bg-slate-200/60 rounded-lg p-1 gap-0.5"
+    >
       {options.map((opt) => {
         const active = value === opt;
         const Icon = iconMap[opt];
@@ -29,12 +33,13 @@ export function PillSegmentedField<T extends string>({
           <button
             key={opt || "none"}
             type="button"
+            aria-pressed={active}
             onClick={() => onChange(value === opt ? undefined : opt)}
             style={{ fontFamily: FONT_UI }}
-            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[13px] font-medium transition-all duration-150 ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[13px] font-medium whitespace-nowrap transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 ${
               active
                 ? `${styleMap[opt]} shadow-sm`
-                : "text-slate-500 hover:text-slate-700 hover:bg-white/70"
+                : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
             }`}
           >
             {Icon && <Icon size={14} />}

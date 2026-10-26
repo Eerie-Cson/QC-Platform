@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Download,
   Star,
@@ -9,7 +9,6 @@ import {
   AlertTriangle,
   Copy,
   UserPlus,
-  Zap,
   LocateFixed,
   XCircle,
 } from "lucide-react";
@@ -33,12 +32,14 @@ import { SessionLink } from "./SessionLink";
 
 const AUTO_NEXT_STORAGE_KEY = "sessionQa.autoNext";
 
+// Height of the app's top nav. The filter toolbar sticks just beneath it.
+const APP_NAV_OFFSET = 56;
+
 export function SessionReviewDashboard() {
   const {
     filteredRows,
     rows,
     ratings,
-    loading,
     submitRating,
     exportCSV,
     filters,
@@ -110,17 +111,7 @@ export function SessionReviewDashboard() {
     setReviewingRowId(targetRow.sessionId);
     setActiveRow(targetRow);
 
-    window.setTimeout(() => {
-      const el = findVisibleRowElement(targetRow.sessionId);
-      if (!el) return;
-      const prefersReducedMotion = window.matchMedia(
-        "(prefers-reduced-motion: reduce)",
-      ).matches;
-      el.scrollIntoView({
-        behavior: prefersReducedMotion ? "auto" : "smooth",
-        block: "center",
-      });
-    }, 100);
+    window.setTimeout(() => scrollRowIntoView(targetRow.sessionId), 100);
   };
 
   const handleSubmitRating = async (
@@ -157,17 +148,7 @@ export function SessionReviewDashboard() {
       setReviewingRowId(nextRow.sessionId);
       setActiveRow(nextRow);
 
-      window.setTimeout(() => {
-        const el = findVisibleRowElement(nextRow.sessionId);
-        if (!el) return;
-        const prefersReducedMotion = window.matchMedia(
-          "(prefers-reduced-motion: reduce)",
-        ).matches;
-        el.scrollIntoView({
-          behavior: prefersReducedMotion ? "auto" : "smooth",
-          block: "center",
-        });
-      }, 100);
+      window.setTimeout(() => scrollRowIntoView(nextRow.sessionId), 100);
     } else {
       showToast(
         autoNext
@@ -186,7 +167,7 @@ export function SessionReviewDashboard() {
     }
   };
 
-  // ----- Floating Widget Logic -----
+  // ----- "Jump to unrated" logic -----
   const firstUnratedRow = filteredRows.find((row) =>
     isRatingEmpty(ratings[row.sessionId] || {}),
   );
@@ -232,186 +213,237 @@ export function SessionReviewDashboard() {
 
   const handleScrollToUnrated = () => {
     if (!firstUnratedRow) return;
-    const el = findVisibleRowElement(firstUnratedRow.sessionId);
-    if (!el) return;
-
-    const prefersReducedMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
-
-    el.scrollIntoView({
-      behavior: prefersReducedMotion ? "auto" : "smooth",
-      block: "center",
-    });
-
-    if (!prefersReducedMotion) {
-      el.animate(
-        [
-          { backgroundColor: "rgba(37, 99, 235, 0.16)" },
-          { backgroundColor: "rgba(37, 99, 235, 0)" },
-        ],
-        { duration: 1600, easing: "ease-out" },
-      );
-    }
+    scrollRowIntoView(firstUnratedRow.sessionId, true);
   };
 
   const hoveredRating = hoveredRowId ? ratings[hoveredRowId] : undefined;
 
-  // ----- Segmented Progress Bar Logic -----
-  const totalCount = rows.length;
-  let submittedCount = 0;
-  let failedCount = 0;
-  let draftedCount = 0;
-  let pendingCount = 0;
+  // ----- Stats & progress -----
+  const stats = useMemo(() => {
+    let submitted = 0;
+    let failed = 0;
+    let drafted = 0;
+    let pending = 0;
 
-  rows.forEach((row) => {
-    const rating = ratings[row.sessionId];
-    if (row.submitted === true) {
-      submittedCount++;
-    } else if (row.submitted === false) {
-      failedCount++;
-    } else if (rating && !isRatingEmpty(rating)) {
-      draftedCount++;
-    } else {
-      pendingCount++;
-    }
-  });
+    rows.forEach((row) => {
+      const rating = ratings[row.sessionId];
+      if (row.submitted === true) submitted++;
+      else if (row.submitted === false) failed++;
+      else if (rating && !isRatingEmpty(rating)) drafted++;
+      else pending++;
+    });
 
-  const submittedPct = totalCount ? (submittedCount / totalCount) * 100 : 0;
-  const failedPct = totalCount ? (failedCount / totalCount) * 100 : 0;
-  const draftedPct = totalCount ? (draftedCount / totalCount) * 100 : 0;
-  const pendingPct = totalCount ? (pendingCount / totalCount) * 100 : 0;
+    return { total: rows.length, submitted, failed, drafted, pending };
+  }, [rows, ratings]);
+
+  const {
+    total: totalCount,
+    submitted: submittedCount,
+    failed: failedCount,
+    drafted: draftedCount,
+    pending: pendingCount,
+  } = stats;
+
   const handledCount = submittedCount + failedCount + draftedCount;
+  const pct = (n: number) => (totalCount ? (n / totalCount) * 100 : 0);
+  const handledPct = Math.round(pct(handledCount));
+
+  const progressSegments = [
+    {
+      key: "submitted",
+      label: "Submitted",
+      count: submittedCount,
+      bar: "bg-emerald-500",
+    },
+    { key: "failed", label: "Failed", count: failedCount, bar: "bg-rose-500" },
+    {
+      key: "drafted",
+      label: "Drafted",
+      count: draftedCount,
+      bar: "bg-blue-500",
+    },
+    {
+      key: "pending",
+      label: "Pending",
+      count: pendingCount,
+      bar: "bg-slate-300",
+    },
+  ];
+
+  const statusTabs = [
+    { key: "All", label: "All", count: totalCount },
+    { key: "Pending", label: "Pending", count: pendingCount },
+    { key: "In progress", label: "Drafted", count: draftedCount },
+    { key: "Rated", label: "Submitted", count: submittedCount },
+  ];
 
   return (
     <div className="min-h-screen bg-[#F7F8FA]" style={{ fontFamily: FONT_UI }}>
-      <div className="max-w-8xl mx-auto px-4 sm:px-6 py-10 pb-24">
-        {/* STICKY HEADER & TRACKER */}
-        <div className="sticky top-[56px] z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 mb-7 bg-[#F7F8FA] border-b border-slate-200/50 shadow-[0_4px_10px_-4px_rgba(0,0,0,0.05)]">
-          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-5">
+      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 pt-8 pb-24">
+        {/* ───────── PAGE HEADER (scrolls away) ───────── */}
+        <header className="flex flex-col gap-6 mb-6">
+          {/* Title + actions */}
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
             <div>
-              <p
-                className="text-[11px] font-semibold uppercase tracking-wider text-blue-600 mb-1.5"
-                style={{ fontFamily: FONT_UI }}
-              >
-                Minute · Session QA
-              </p>
               <h1
-                className="text-[28px] leading-none font-semibold text-slate-900 tracking-tight"
+                className="text-[26px] leading-tight font-semibold text-slate-900 tracking-tight"
                 style={{ fontFamily: FONT_DISPLAY }}
               >
                 Session Review Queue
               </h1>
-
-              {/* Segmented Progress Bar */}
-              <div className="flex items-center gap-3 mt-3 flex-wrap">
-                <div className="w-48 h-2 rounded-full bg-slate-200 overflow-hidden flex shadow-inner">
-                  {submittedCount > 0 && (
-                    <div
-                      className="h-full bg-emerald-500 transition-all duration-300"
-                      style={{ width: `${submittedPct}%` }}
-                      title={`${submittedCount} Submitted`}
-                    />
-                  )}
-                  {failedCount > 0 && (
-                    <div
-                      className="h-full bg-rose-500 transition-all duration-300"
-                      style={{ width: `${failedPct}%` }}
-                      title={`${failedCount} Failed`}
-                    />
-                  )}
-                  {draftedCount > 0 && (
-                    <div
-                      className="h-full bg-blue-500 transition-all duration-300"
-                      style={{ width: `${draftedPct}%` }}
-                      title={`${draftedCount} Drafted`}
-                    />
-                  )}
-                  {pendingCount > 0 && (
-                    <div
-                      className="h-full bg-slate-300 transition-all duration-300"
-                      style={{ width: `${pendingPct}%` }}
-                      title={`${pendingCount} Pending`}
-                    />
-                  )}
-                </div>
-                <p className="text-sm text-slate-500">
-                  <span className="font-semibold text-slate-700">
-                    {handledCount}
-                  </span>{" "}
-                  of {totalCount} handled
-                </p>
-                {hasActiveFilters && (
-                  <span className="text-sm text-blue-600">
-                    ({filteredRows.length} shown)
-                  </span>
-                )}
-              </div>
-
-              {/* Legend */}
-              <div className="flex items-center gap-4 mt-2 text-xs font-medium flex-wrap">
-                <span className="flex items-center gap-1.5 text-emerald-700">
-                  <div className="w-2.5 h-2.5 rounded-sm bg-emerald-500" />
-                  {submittedCount} Submitted
-                </span>
-                <span className="flex items-center gap-1.5 text-rose-700">
-                  <div className="w-2.5 h-2.5 rounded-sm bg-rose-500" />
-                  {failedCount} Failed
-                </span>
-                <span className="flex items-center gap-1.5 text-blue-700">
-                  <div className="w-2.5 h-2.5 rounded-sm bg-blue-500" />
-                  {draftedCount} Drafted
-                </span>
-                <span className="flex items-center gap-1.5 text-slate-500">
-                  <div className="w-2.5 h-2.5 rounded-sm bg-slate-300" />
-                  {pendingCount} Pending
-                </span>
-              </div>
+              <p className="text-sm text-slate-500 mt-1">
+                {pendingCount > 0
+                  ? `${pendingCount} of ${totalCount} sessions still to review`
+                  : `All ${totalCount} sessions handled`}
+              </p>
             </div>
 
-            {/* Header actions */}
-            <div className="flex items-center gap-2 relative self-start sm:self-auto">
-              <TaskSearchInput filters={filters} setFilters={setFilters} />
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoNext}
+                onClick={() => setAutoNext((v) => !v)}
+                title="After you submit a review, open the next unrated session automatically"
+                className="group inline-flex items-center gap-2.5 text-sm font-medium text-slate-600 hover:text-slate-900 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40"
+              >
+                <span
+                  className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                    autoNext ? "bg-blue-600" : "bg-slate-300"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                      autoNext ? "translate-x-[18px]" : "translate-x-0.5"
+                    }`}
+                  />
+                </span>
+                Auto-next
+              </button>
+
+              <button
+                onClick={handleDownload}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-white text-slate-700 text-sm font-medium border border-slate-200 hover:bg-slate-50 hover:border-slate-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40"
+              >
+                <Download size={15} />
+                Export QC CSV
+              </button>
+            </div>
+          </div>
+
+          {/* Progress — one bar, one legend, no card */}
+          <div>
+            <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 mb-2.5">
+              <p className="text-sm text-slate-600">
+                <span
+                  className="font-semibold text-slate-900"
+                  style={{ fontFamily: FONT_DATA }}
+                >
+                  {handledCount}
+                </span>{" "}
+                of {totalCount} handled
+                <span className="text-slate-400"> · {handledPct}%</span>
+              </p>
+
+              <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                {progressSegments.map((s) => (
+                  <li
+                    key={s.key}
+                    className={`inline-flex items-center gap-1.5 ${
+                      s.count === 0 ? "opacity-50" : ""
+                    }`}
+                  >
+                    <span className={`h-2 w-2 rounded-full ${s.bar}`} />
+                    {s.label}
+                    <span
+                      className="text-slate-700 font-medium"
+                      style={{ fontFamily: FONT_DATA }}
+                    >
+                      {s.count}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div
+              role="progressbar"
+              aria-label="Review progress"
+              aria-valuemin={0}
+              aria-valuemax={totalCount}
+              aria-valuenow={handledCount}
+              className="w-full h-2 rounded-full bg-slate-200/80 overflow-hidden flex"
+            >
+              {progressSegments
+                .filter((s) => s.key !== "pending" && s.count > 0)
+                .map((s) => (
+                  <div
+                    key={s.key}
+                    className={`h-full ${s.bar} transition-all duration-300`}
+                    style={{ width: `${pct(s.count)}%` }}
+                    title={`${s.count} ${s.label}`}
+                  />
+                ))}
+            </div>
+          </div>
+
+          {/* Daily tracker — collapsed by default is a single quiet line */}
+          <DailyTracker days={14} />
+        </header>
+
+        {/* ───────── STICKY TOOLBAR (the only sticky piece) ───────── */}
+        <div
+          className="sticky z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 mb-4 bg-[#F7F8FA]/90 backdrop-blur-md border-b border-slate-200/70"
+          style={{ top: APP_NAV_OFFSET }}
+        >
+          <div className="flex flex-col md:flex-row md:items-center gap-3">
+            {/* Status segmented control */}
+            <div
+              role="group"
+              aria-label="Filter by review status"
+              className="inline-flex items-center gap-0.5 p-1 rounded-lg bg-slate-200/60 overflow-x-auto max-w-full scrollbar-hide"
+            >
+              {statusTabs.map((tab) => {
+                const isActive = filters.reviewStatus === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    aria-pressed={isActive}
+                    onClick={() =>
+                      setFilters((f) => ({ ...f, reviewStatus: tab.key }))
+                    }
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 ${
+                      isActive
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    {tab.label}
+                    <span
+                      className={`text-xs tabular-nums ${
+                        isActive ? "text-slate-500" : "text-slate-400"
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Search + advanced filters */}
+            <div className="flex items-center gap-2 md:ml-auto">
+              <div className="flex-1 md:flex-none">
+                <TaskSearchInput filters={filters} setFilters={setFilters} />
+              </div>
               <SessionFilters
                 filters={filters}
                 setFilters={setFilters}
                 clearFilters={clearFilters}
                 hasActiveFilters={hasActiveFilters}
               />
-              <button
-                type="button"
-                onClick={() => setAutoNext((v) => !v)}
-                aria-pressed={autoNext}
-                title={
-                  autoNext
-                    ? "Auto-next is on — submitting a review opens the next unrated session"
-                    : "Auto-next is off — enable to jump to the next unrated session after submitting"
-                }
-                className={`inline-flex items-center gap-1.5 px-3 py-2.5 rounded-lg text-sm font-medium border transition-colors ${
-                  autoNext
-                    ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
-                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                }`}
-              >
-                <Zap size={16} />
-                <span className="hidden lg:inline">
-                  {autoNext ? "Auto-next on" : "Auto-next"}
-                </span>
-              </button>
-              <button
-                onClick={handleDownload}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 active:bg-slate-950 transition-colors shadow-sm"
-              >
-                <Download size={16} />
-                <span className="hidden lg:inline">Export QC CSV</span>
-                <span className="lg:hidden">Export</span>
-              </button>
             </div>
-          </div>
-
-          {/* Daily Tracker */}
-          <div className="mt-4">
-            <DailyTracker days={14} />
           </div>
         </div>
 
@@ -792,6 +824,17 @@ export function SessionReviewDashboard() {
         </div>
       </div>
 
+      {/* Floating "Jump to unrated" — only when the next unrated row is off-screen */}
+      {firstUnratedRow && !isUnratedVisible && !activeRow && (
+        <button
+          onClick={handleScrollToUnrated}
+          className="fixed bottom-6 right-6 z-30 inline-flex items-center gap-2 pl-3.5 pr-4 py-2.5 rounded-full bg-blue-600 text-white text-sm font-medium shadow-lg shadow-blue-900/20 hover:bg-blue-700 active:bg-blue-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 focus-visible:ring-offset-2"
+        >
+          <LocateFixed size={15} />
+          Jump to unrated
+        </button>
+      )}
+
       {/* Hover summary */}
       {hoveredRowId && hoverRect && hoveredRating && (
         <div
@@ -809,19 +852,6 @@ export function SessionReviewDashboard() {
               rows.find((r) => r.sessionId === hoveredRowId)?.systemRating || ""
             }
           />
-        </div>
-      )}
-
-      {/* Floating Widget */}
-      {firstUnratedRow && !isUnratedVisible && (
-        <div className="fixed bottom-6 right-6 z-40 animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <button
-            onClick={handleScrollToUnrated}
-            className="flex items-center gap-2 px-4 py-3 rounded-full bg-blue-600 text-white text-sm font-semibold shadow-lg shadow-blue-600/30 hover:bg-blue-700 hover:shadow-xl hover:-translate-y-0.5 transition-all cursor-pointer"
-          >
-            <LocateFixed size={18} />
-            <span className="pr-1">Jump to Unrated</span>
-          </button>
         </div>
       )}
 
@@ -848,6 +878,7 @@ export function SessionReviewDashboard() {
       {/* Toast */}
       {toast && (
         <div
+          role="status"
           className="fixed bottom-5 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm font-medium px-4 py-2.5 rounded-lg shadow-lg z-50"
           style={{ fontFamily: FONT_UI }}
         >
@@ -864,4 +895,29 @@ function findVisibleRowElement(sessionId: string): HTMLElement | null {
   ).filter((el) => el.dataset.sessionId === sessionId);
 
   return nodes.find((el) => el.offsetParent !== null) ?? nodes[0] ?? null;
+}
+
+/** Scrolls a row to the centre of the viewport, respecting reduced motion. */
+function scrollRowIntoView(sessionId: string, flash = false) {
+  const el = findVisibleRowElement(sessionId);
+  if (!el) return;
+
+  const prefersReducedMotion = window.matchMedia(
+    "(prefers-reduced-motion: reduce)",
+  ).matches;
+
+  el.scrollIntoView({
+    behavior: prefersReducedMotion ? "auto" : "smooth",
+    block: "center",
+  });
+
+  if (flash && !prefersReducedMotion) {
+    el.animate(
+      [
+        { backgroundColor: "rgba(37, 99, 235, 0.16)" },
+        { backgroundColor: "rgba(37, 99, 235, 0)" },
+      ],
+      { duration: 1600, easing: "ease-out" },
+    );
+  }
 }

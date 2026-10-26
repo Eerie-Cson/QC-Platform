@@ -10,6 +10,8 @@ import {
   Copy,
   UserPlus,
   Zap,
+  LocateFixed,
+  XCircle,
 } from "lucide-react";
 import { SessionRow, Ratings } from "../utilities/types";
 import { FONT_DISPLAY, FONT_UI, FONT_DATA } from "../utilities/constants";
@@ -92,7 +94,6 @@ export function SessionReviewDashboard() {
     [filteredRows, ratings],
   );
 
-  // Calculate Previous / Next navigation state
   const activeRowIndex = activeRow
     ? filteredRows.findIndex((r) => r.sessionId === activeRow.sessionId)
     : -1;
@@ -110,7 +111,6 @@ export function SessionReviewDashboard() {
     setReviewingRowId(targetRow.sessionId);
     setActiveRow(targetRow);
 
-    // Scroll the background table to the new row
     window.setTimeout(() => {
       const el = findVisibleRowElement(targetRow.sessionId);
       if (!el) return;
@@ -187,54 +187,74 @@ export function SessionReviewDashboard() {
     }
   };
 
-  const hasAutoScrolled = useRef(false);
-  const scrollTimer = useRef<number | null>(null);
+  // ----- Floating Widget Logic -----
+  const firstUnratedRow = filteredRows.find((row) =>
+    isRatingEmpty(ratings[row.sessionId] || {}),
+  );
+  const firstUnratedId = firstUnratedRow?.sessionId;
+
+  const [isUnratedVisible, setIsUnratedVisible] = useState(false);
+  const observerRef = useRef<IntersectionObserver | null>(null);
 
   useEffect(() => {
-    return () => {
-      if (scrollTimer.current !== null)
-        window.clearTimeout(scrollTimer.current);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (loading || hasAutoScrolled.current || filteredRows.length === 0) return;
-
-    const target = filteredRows.find((row) => {
-      const rating = ratings[row.sessionId] || {};
-      return isRatingEmpty(rating);
-    });
-    if (!target) {
-      hasAutoScrolled.current = true;
+    if (!firstUnratedId) {
+      setIsUnratedVisible(false);
       return;
     }
 
-    hasAutoScrolled.current = true;
-
-    scrollTimer.current = window.setTimeout(() => {
-      const el = findVisibleRowElement(target.sessionId);
-      if (!el) return;
-
-      const prefersReducedMotion = window.matchMedia(
-        "(prefers-reduced-motion: reduce)",
-      ).matches;
-
-      el.scrollIntoView({
-        behavior: prefersReducedMotion ? "auto" : "smooth",
-        block: "center",
-      });
-
-      if (!prefersReducedMotion) {
-        el.animate(
-          [
-            { backgroundColor: "rgba(37, 99, 235, 0.16)" },
-            { backgroundColor: "rgba(37, 99, 235, 0)" },
-          ],
-          { duration: 1600, easing: "ease-out" },
-        );
+    const timer = setTimeout(() => {
+      const el = findVisibleRowElement(firstUnratedId);
+      if (!el) {
+        setIsUnratedVisible(false);
+        return;
       }
-    }, 150);
-  }, [loading, filteredRows, ratings]);
+
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+      }
+
+      observerRef.current = new IntersectionObserver(
+        ([entry]) => {
+          setIsUnratedVisible(entry.isIntersecting);
+        },
+        { threshold: 0.1, rootMargin: "0px 0px -50px 0px" },
+      );
+
+      observerRef.current.observe(el);
+    }, 100);
+
+    return () => {
+      clearTimeout(timer);
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+      }
+    };
+  }, [firstUnratedId, filteredRows]);
+
+  const handleScrollToUnrated = () => {
+    if (!firstUnratedRow) return;
+    const el = findVisibleRowElement(firstUnratedRow.sessionId);
+    if (!el) return;
+
+    const prefersReducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+
+    el.scrollIntoView({
+      behavior: prefersReducedMotion ? "auto" : "smooth",
+      block: "center",
+    });
+
+    if (!prefersReducedMotion) {
+      el.animate(
+        [
+          { backgroundColor: "rgba(37, 99, 235, 0.16)" },
+          { backgroundColor: "rgba(37, 99, 235, 0)" },
+        ],
+        { duration: 1600, easing: "ease-out" },
+      );
+    }
+  };
 
   const hoveredRating = hoveredRowId ? ratings[hoveredRowId] : undefined;
   const progressPct = rows.length
@@ -243,86 +263,88 @@ export function SessionReviewDashboard() {
 
   return (
     <div className="min-h-screen bg-[#F7F8FA]" style={{ fontFamily: FONT_UI }}>
-      <div className="max-w-8xl mx-auto px-4 sm:px-6 py-10">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-5 mb-7 sticky top-[56px] z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 bg-[#F7F8FA]/95 backdrop-blur-sm">
-          <div>
-            <p
-              className="text-[11px] font-semibold uppercase tracking-wider text-blue-600 mb-1.5"
-              style={{ fontFamily: FONT_UI }}
-            >
-              Minute · Session QA
-            </p>
-            <h1
-              className="text-[28px] leading-none font-semibold text-slate-900 tracking-tight"
-              style={{ fontFamily: FONT_DISPLAY }}
-            >
-              Session Review Queue
-            </h1>
-            <div className="flex items-center gap-3 mt-3">
-              <div className="w-28 h-1.5 rounded-full bg-slate-200 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-blue-600 transition-all duration-300"
-                  style={{ width: `${progressPct}%` }}
-                />
-              </div>
-              <p className="text-sm text-slate-500">
-                <span className="font-semibold text-slate-700">
-                  {reviewedCount}
-                </span>{" "}
-                of {rows.length} reviewed
+      <div className="max-w-8xl mx-auto px-4 sm:px-6 py-10 pb-24">
+        {/* STICKY HEADER & TRACKER */}
+        <div className="sticky top-[56px] z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 mb-7 bg-[#F7F8FA] border-b border-slate-200/50 shadow-[0_4px_10px_-4px_rgba(0,0,0,0.05)]">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-5">
+            <div>
+              <p
+                className="text-[11px] font-semibold uppercase tracking-wider text-blue-600 mb-1.5"
+                style={{ fontFamily: FONT_UI }}
+              >
+                Minute · Session QA
               </p>
-              {hasActiveFilters && (
-                <span className="text-sm text-blue-600">
-                  ({filteredRows.length} shown)
+              <h1
+                className="text-[28px] leading-none font-semibold text-slate-900 tracking-tight"
+                style={{ fontFamily: FONT_DISPLAY }}
+              >
+                Session Review Queue
+              </h1>
+              <div className="flex items-center gap-3 mt-3">
+                <div className="w-28 h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-blue-600 transition-all duration-300"
+                    style={{ width: `${progressPct}%` }}
+                  />
+                </div>
+                <p className="text-sm text-slate-500">
+                  <span className="font-semibold text-slate-700">
+                    {reviewedCount}
+                  </span>{" "}
+                  of {rows.length} reviewed
+                </p>
+                {hasActiveFilters && (
+                  <span className="text-sm text-blue-600">
+                    ({filteredRows.length} shown)
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Header actions */}
+            <div className="flex items-center gap-2 relative self-start sm:self-auto">
+              <TaskSearchInput filters={filters} setFilters={setFilters} />
+              <SessionFilters
+                filters={filters}
+                setFilters={setFilters}
+                clearFilters={clearFilters}
+                hasActiveFilters={hasActiveFilters}
+              />
+              <button
+                type="button"
+                onClick={() => setAutoNext((v) => !v)}
+                aria-pressed={autoNext}
+                title={
+                  autoNext
+                    ? "Auto-next is on — submitting a review opens the next unrated session"
+                    : "Auto-next is off — enable to jump to the next unrated session after submitting"
+                }
+                className={`inline-flex items-center gap-1.5 px-3 py-2.5 rounded-lg text-sm font-medium border transition-colors ${
+                  autoNext
+                    ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <Zap size={16} />
+                <span className="hidden lg:inline">
+                  {autoNext ? "Auto-next on" : "Auto-next"}
                 </span>
-              )}
+              </button>
+              <button
+                onClick={handleDownload}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 active:bg-slate-950 transition-colors shadow-sm"
+              >
+                <Download size={16} />
+                <span className="hidden lg:inline">Export QC CSV</span>
+                <span className="lg:hidden">Export</span>
+              </button>
             </div>
           </div>
 
-          {/* Header actions */}
-          <div className="flex items-center gap-2 relative self-start sm:self-auto">
-            <TaskSearchInput filters={filters} setFilters={setFilters} />
-            <SessionFilters
-              filters={filters}
-              setFilters={setFilters}
-              clearFilters={clearFilters}
-              hasActiveFilters={hasActiveFilters}
-            />
-            <button
-              type="button"
-              onClick={() => setAutoNext((v) => !v)}
-              aria-pressed={autoNext}
-              title={
-                autoNext
-                  ? "Auto-next is on — submitting a review opens the next unrated session"
-                  : "Auto-next is off — enable to jump to the next unrated session after submitting"
-              }
-              className={`inline-flex items-center gap-1.5 px-3 py-2.5 rounded-lg text-sm font-medium border transition-colors ${
-                autoNext
-                  ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
-                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-              }`}
-            >
-              <Zap size={16} />
-              <span className="hidden lg:inline">
-                {autoNext ? "Auto-next on" : "Auto-next"}
-              </span>
-            </button>
-            <button
-              onClick={handleDownload}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 active:bg-slate-950 transition-colors shadow-sm"
-            >
-              <Download size={16} />
-              <span className="hidden lg:inline">Export QC CSV</span>
-              <span className="lg:hidden">Export</span>
-            </button>
+          {/* Daily Tracker */}
+          <div className="mt-4">
+            <DailyTracker days={14} />
           </div>
-        </div>
-
-        {/* Daily tracker */}
-        <div className="mb-6">
-          <DailyTracker days={14} />
         </div>
 
         {/* Table (desktop) */}
@@ -343,7 +365,8 @@ export function SessionReviewDashboard() {
             <tbody>
               {filteredRows.map((row, i) => {
                 const rating = ratings[row.sessionId];
-                const done = isRatingComplete(rating);
+                const done = row.submitted === true;
+                const failed = row.submitted === false;
                 const hasRating =
                   rating !== undefined && !isRatingEmpty(rating);
                 const isHighlighted = reviewingRowId === row.sessionId;
@@ -369,11 +392,30 @@ export function SessionReviewDashboard() {
                           : "pl-5 pr-5"
                       }`}
                     >
-                      {row.email}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span>{row.email}</span>
+
+                        {done && (
+                          <span title="Successfully submitted by auto-rater">
+                            <CheckCircle2
+                              size={14}
+                              className="text-emerald-500 shrink-0"
+                            />
+                          </span>
+                        )}
+                        {failed && (
+                          <span title="Auto-rater failed to submit (or not found in queue)">
+                            <XCircle
+                              size={14}
+                              className="text-rose-500 shrink-0"
+                            />
+                          </span>
+                        )}
+                      </div>
 
                       {row.new && (
                         <span
-                          className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wider text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded"
+                          className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wider text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded mt-1"
                           title="This session comes from a newly-created account"
                         >
                           <UserPlus size={11} /> New account
@@ -422,6 +464,10 @@ export function SessionReviewDashboard() {
                       {done ? (
                         <span className="inline-flex items-center gap-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap">
                           <CheckCircle2 size={13} /> Reviewed
+                        </span>
+                      ) : failed ? (
+                        <span className="inline-flex items-center gap-1.5 text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap">
+                          <XCircle size={13} /> Failed
                         </span>
                       ) : hasRating ? (
                         <span className="inline-flex items-center gap-1.5 text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap">
@@ -495,7 +541,8 @@ export function SessionReviewDashboard() {
         <div className="lg:hidden space-y-3">
           {filteredRows.map((row) => {
             const rating = ratings[row.sessionId];
-            const done = isRatingComplete(rating);
+            const done = row.submitted === true;
+            const failed = row.submitted === false;
             const hasRating = rating !== undefined && !isRatingEmpty(rating);
             const isHighlighted = reviewingRowId === row.sessionId;
             return (
@@ -512,9 +559,22 @@ export function SessionReviewDashboard() {
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="font-medium text-slate-800 text-sm truncate">
-                      {row.email}
-                    </p>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="font-medium text-slate-800 text-sm truncate">
+                        {row.email}
+                      </p>
+
+                      {done && (
+                        <CheckCircle2
+                          size={13}
+                          className="text-emerald-500 shrink-0"
+                        />
+                      )}
+                      {failed && (
+                        <XCircle size={13} className="text-rose-500 shrink-0" />
+                      )}
+                    </div>
+
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                       <p className="text-slate-500 text-sm">{row.task}</p>
                       {row.new && (
@@ -541,19 +601,25 @@ export function SessionReviewDashboard() {
                       {row.sessionId}
                     </p>
                   </div>
-                  {done ? (
-                    <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-full text-[11px] font-medium shrink-0">
-                      <CheckCircle2 size={12} /> Reviewed
-                    </span>
-                  ) : hasRating ? (
-                    <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full text-[11px] font-medium shrink-0">
-                      <AlertTriangle size={12} /> In progress
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-slate-500 bg-slate-100 border border-slate-200 px-2 py-1 rounded-full text-[11px] font-medium shrink-0">
-                      <Circle size={12} /> Pending
-                    </span>
-                  )}
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    {done ? (
+                      <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-full text-[11px] font-medium">
+                        <CheckCircle2 size={12} /> Reviewed
+                      </span>
+                    ) : failed ? (
+                      <span className="inline-flex items-center gap-1 text-rose-700 bg-rose-50 border border-rose-200 px-2 py-1 rounded-full text-[11px] font-medium">
+                        <XCircle size={12} /> Failed
+                      </span>
+                    ) : hasRating ? (
+                      <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full text-[11px] font-medium">
+                        <AlertTriangle size={12} /> In progress
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-slate-500 bg-slate-100 border border-slate-200 px-2 py-1 rounded-full text-[11px] font-medium">
+                        <Circle size={12} /> Pending
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div
                   className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs text-slate-500 mt-3 pt-3 border-t border-slate-100"
@@ -661,6 +727,19 @@ export function SessionReviewDashboard() {
               rows.find((r) => r.sessionId === hoveredRowId)?.systemRating || ""
             }
           />
+        </div>
+      )}
+
+      {/* Floating Widget */}
+      {firstUnratedRow && !isUnratedVisible && (
+        <div className="fixed bottom-6 right-6 z-40 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <button
+            onClick={handleScrollToUnrated}
+            className="flex items-center gap-2 px-4 py-3 rounded-full bg-blue-600 text-white text-sm font-semibold shadow-lg shadow-blue-600/30 hover:bg-blue-700 hover:shadow-xl hover:-translate-y-0.5 transition-all cursor-pointer"
+          >
+            <LocateFixed size={18} />
+            <span className="pr-1">Jump to Unrated</span>
+          </button>
         </div>
       )}
 

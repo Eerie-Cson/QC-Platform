@@ -37,6 +37,11 @@ export interface SessionRow {
   personalGmail?: boolean;
   duplicate?: boolean;
   new?: boolean;
+  faceVisible?: boolean;
+  // --- Added these so TS knows they exist ---
+  submitted?: boolean;
+  submittedAt?: string;
+  ratedAt?: string;
 }
 
 export type Ratings = {

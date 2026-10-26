@@ -103,8 +103,10 @@ export function useSessions({
       let statusMatch = true;
       const isEmpty = isRatingEmpty(rating);
       const isComplete = isRatingComplete(rating);
+      const isSubmitted = row.submitted === true; // NEW: Check submitted flag
+
       if (filters.reviewStatus === "Rated") {
-        statusMatch = isComplete;
+        statusMatch = isSubmitted; // Only show if fully submitted
       } else if (filters.reviewStatus === "In progress") {
         statusMatch = !isEmpty && !isComplete;
       } else if (filters.reviewStatus === "Pending") {
@@ -223,9 +225,11 @@ export function useSessions({
     }
   }, [exportEndpoint]);
 
+  // ---------- reviewedCount ----------
+  // STRICT SOURCE OF TRUTH: Only count if the auto-rater pushed it
   const reviewedCount = useMemo(
-    () => Object.values(ratings).filter(isRatingComplete).length,
-    [ratings],
+    () => rows.filter((r) => r.submitted === true).length,
+    [rows],
   );
 
   return {

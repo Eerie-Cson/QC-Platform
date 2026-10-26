@@ -39,7 +39,6 @@ export function SessionReviewDashboard() {
     rows,
     ratings,
     loading,
-    reviewedCount,
     submitRating,
     exportCSV,
     filters,
@@ -257,9 +256,32 @@ export function SessionReviewDashboard() {
   };
 
   const hoveredRating = hoveredRowId ? ratings[hoveredRowId] : undefined;
-  const progressPct = rows.length
-    ? Math.round((reviewedCount / rows.length) * 100)
-    : 0;
+
+  // ----- Segmented Progress Bar Logic -----
+  const totalCount = rows.length;
+  let submittedCount = 0;
+  let failedCount = 0;
+  let draftedCount = 0;
+  let pendingCount = 0;
+
+  rows.forEach((row) => {
+    const rating = ratings[row.sessionId];
+    if (row.submitted === true) {
+      submittedCount++;
+    } else if (row.submitted === false) {
+      failedCount++;
+    } else if (rating && !isRatingEmpty(rating)) {
+      draftedCount++;
+    } else {
+      pendingCount++;
+    }
+  });
+
+  const submittedPct = totalCount ? (submittedCount / totalCount) * 100 : 0;
+  const failedPct = totalCount ? (failedCount / totalCount) * 100 : 0;
+  const draftedPct = totalCount ? (draftedCount / totalCount) * 100 : 0;
+  const pendingPct = totalCount ? (pendingCount / totalCount) * 100 : 0;
+  const handledCount = submittedCount + failedCount + draftedCount;
 
   return (
     <div className="min-h-screen bg-[#F7F8FA]" style={{ fontFamily: FONT_UI }}>
@@ -280,24 +302,70 @@ export function SessionReviewDashboard() {
               >
                 Session Review Queue
               </h1>
-              <div className="flex items-center gap-3 mt-3">
-                <div className="w-28 h-1.5 rounded-full bg-slate-200 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-blue-600 transition-all duration-300"
-                    style={{ width: `${progressPct}%` }}
-                  />
+
+              {/* Segmented Progress Bar */}
+              <div className="flex items-center gap-3 mt-3 flex-wrap">
+                <div className="w-48 h-2 rounded-full bg-slate-200 overflow-hidden flex shadow-inner">
+                  {submittedCount > 0 && (
+                    <div
+                      className="h-full bg-emerald-500 transition-all duration-300"
+                      style={{ width: `${submittedPct}%` }}
+                      title={`${submittedCount} Submitted`}
+                    />
+                  )}
+                  {failedCount > 0 && (
+                    <div
+                      className="h-full bg-rose-500 transition-all duration-300"
+                      style={{ width: `${failedPct}%` }}
+                      title={`${failedCount} Failed`}
+                    />
+                  )}
+                  {draftedCount > 0 && (
+                    <div
+                      className="h-full bg-blue-500 transition-all duration-300"
+                      style={{ width: `${draftedPct}%` }}
+                      title={`${draftedCount} Drafted`}
+                    />
+                  )}
+                  {pendingCount > 0 && (
+                    <div
+                      className="h-full bg-slate-300 transition-all duration-300"
+                      style={{ width: `${pendingPct}%` }}
+                      title={`${pendingCount} Pending`}
+                    />
+                  )}
                 </div>
                 <p className="text-sm text-slate-500">
                   <span className="font-semibold text-slate-700">
-                    {reviewedCount}
+                    {handledCount}
                   </span>{" "}
-                  of {rows.length} reviewed
+                  of {totalCount} handled
                 </p>
                 {hasActiveFilters && (
                   <span className="text-sm text-blue-600">
                     ({filteredRows.length} shown)
                   </span>
                 )}
+              </div>
+
+              {/* Legend */}
+              <div className="flex items-center gap-4 mt-2 text-xs font-medium flex-wrap">
+                <span className="flex items-center gap-1.5 text-emerald-700">
+                  <div className="w-2.5 h-2.5 rounded-sm bg-emerald-500" />
+                  {submittedCount} Submitted
+                </span>
+                <span className="flex items-center gap-1.5 text-rose-700">
+                  <div className="w-2.5 h-2.5 rounded-sm bg-rose-500" />
+                  {failedCount} Failed
+                </span>
+                <span className="flex items-center gap-1.5 text-blue-700">
+                  <div className="w-2.5 h-2.5 rounded-sm bg-blue-500" />
+                  {draftedCount} Drafted
+                </span>
+                <span className="flex items-center gap-1.5 text-slate-500">
+                  <div className="w-2.5 h-2.5 rounded-sm bg-slate-300" />
+                  {pendingCount} Pending
+                </span>
               </div>
             </div>
 
@@ -365,10 +433,13 @@ export function SessionReviewDashboard() {
             <tbody>
               {filteredRows.map((row, i) => {
                 const rating = ratings[row.sessionId];
-                const done = row.submitted === true;
-                const failed = row.submitted === false;
+                const isSubmitted = row.submitted === true;
+                const isFailed = row.submitted === false;
+                const isRated =
+                  rating !== undefined && isRatingComplete(rating);
                 const hasRating =
                   rating !== undefined && !isRatingEmpty(rating);
+                const isButtonDone = isSubmitted || isRated;
                 const isHighlighted = reviewingRowId === row.sessionId;
 
                 return (
@@ -395,7 +466,7 @@ export function SessionReviewDashboard() {
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span>{row.email}</span>
 
-                        {done && (
+                        {isSubmitted && (
                           <span title="Successfully submitted by auto-rater">
                             <CheckCircle2
                               size={14}
@@ -403,7 +474,7 @@ export function SessionReviewDashboard() {
                             />
                           </span>
                         )}
-                        {failed && (
+                        {isFailed && (
                           <span title="Auto-rater failed to submit (or not found in queue)">
                             <XCircle
                               size={14}
@@ -461,13 +532,17 @@ export function SessionReviewDashboard() {
                       {formatTimestamp(row.uploadedTimestamp)}
                     </td>
                     <td className="px-5 py-4">
-                      {done ? (
+                      {isSubmitted ? (
                         <span className="inline-flex items-center gap-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap">
                           <CheckCircle2 size={13} /> Reviewed
                         </span>
-                      ) : failed ? (
+                      ) : isFailed ? (
                         <span className="inline-flex items-center gap-1.5 text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap">
                           <XCircle size={13} /> Failed
+                        </span>
+                      ) : isRated ? (
+                        <span className="inline-flex items-center gap-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap">
+                          <CheckCircle2 size={13} /> Reviewed
                         </span>
                       ) : hasRating ? (
                         <span className="inline-flex items-center gap-1.5 text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap">
@@ -498,21 +573,21 @@ export function SessionReviewDashboard() {
                             setActiveRow(row);
                           }}
                           className={`inline-flex items-center justify-center gap-1.5 min-w-[120px] px-3 py-2 rounded-lg text-xs font-semibold transition-all border cursor-pointer whitespace-nowrap ${
-                            done
+                            isButtonDone
                               ? "bg-slate-100 text-blue-500 hover:bg-blue-50 hover:text-blue-700 border-slate-300 hover:border-blue-300"
                               : hasRating
                                 ? "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-blue-600 border-slate-300"
                                 : "bg-blue-600 text-white hover:bg-blue-700 border-transparent shadow-sm shadow-blue-600/20"
                           }`}
                         >
-                          {done ? (
+                          {isButtonDone ? (
                             <SquarePen size={13} />
                           ) : hasRating ? (
                             <Play size={13} />
                           ) : (
                             <Star size={13} />
                           )}
-                          {done
+                          {isButtonDone
                             ? "Edit review"
                             : hasRating
                               ? "Update draft"
@@ -541,10 +616,13 @@ export function SessionReviewDashboard() {
         <div className="lg:hidden space-y-3">
           {filteredRows.map((row) => {
             const rating = ratings[row.sessionId];
-            const done = row.submitted === true;
-            const failed = row.submitted === false;
+            const isSubmitted = row.submitted === true;
+            const isFailed = row.submitted === false;
+            const isRated = rating !== undefined && isRatingComplete(rating);
             const hasRating = rating !== undefined && !isRatingEmpty(rating);
+            const isButtonDone = isSubmitted || isRated;
             const isHighlighted = reviewingRowId === row.sessionId;
+
             return (
               <div
                 key={row.sessionId}
@@ -564,13 +642,13 @@ export function SessionReviewDashboard() {
                         {row.email}
                       </p>
 
-                      {done && (
+                      {isSubmitted && (
                         <CheckCircle2
                           size={13}
                           className="text-emerald-500 shrink-0"
                         />
                       )}
-                      {failed && (
+                      {isFailed && (
                         <XCircle size={13} className="text-rose-500 shrink-0" />
                       )}
                     </div>
@@ -602,13 +680,17 @@ export function SessionReviewDashboard() {
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
-                    {done ? (
+                    {isSubmitted ? (
                       <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-full text-[11px] font-medium">
                         <CheckCircle2 size={12} /> Reviewed
                       </span>
-                    ) : failed ? (
+                    ) : isFailed ? (
                       <span className="inline-flex items-center gap-1 text-rose-700 bg-rose-50 border border-rose-200 px-2 py-1 rounded-full text-[11px] font-medium">
                         <XCircle size={12} /> Failed
+                      </span>
+                    ) : isRated ? (
+                      <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-full text-[11px] font-medium">
+                        <CheckCircle2 size={12} /> Reviewed
                       </span>
                     ) : hasRating ? (
                       <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full text-[11px] font-medium">
@@ -678,21 +760,21 @@ export function SessionReviewDashboard() {
                       setActiveRow(row);
                     }}
                     className={`flex-1 inline-flex items-center justify-center gap-1.5 min-w-[120px] px-3 py-2 rounded-lg text-xs font-semibold border cursor-pointer ${
-                      done
+                      isButtonDone
                         ? "bg-slate-100 text-blue-600 hover:bg-blue-50 hover:text-blue-700 border-slate-300 hover:border-blue-300"
                         : hasRating
                           ? "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-blue-600 border-slate-300"
                           : "bg-blue-600 text-white hover:bg-blue-700 border-transparent shadow-sm shadow-blue-600/20"
                     }`}
                   >
-                    {done ? (
+                    {isButtonDone ? (
                       <SquarePen size={13} />
                     ) : hasRating ? (
                       <Play size={13} />
                     ) : (
                       <Star size={13} />
                     )}{" "}
-                    {done
+                    {isButtonDone
                       ? "Edit review"
                       : hasRating
                         ? "Update draft"

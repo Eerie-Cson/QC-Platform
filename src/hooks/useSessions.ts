@@ -228,8 +228,16 @@ export function useSessions({
   // ---------- reviewedCount ----------
   // STRICT SOURCE OF TRUTH: Only count if the auto-rater pushed it
   const reviewedCount = useMemo(
-    () => rows.filter((r) => r.submitted === true).length,
-    [rows],
+    () =>
+      rows.filter((r) => {
+        // 1. If the auto-rater successfully submitted it, it's reviewed.
+        if (r.submitted === true) return true;
+
+        // 2. If all rating fields are filled out in the UI, it's reviewed.
+        const rating = ratings[r.sessionId];
+        return rating !== undefined && isRatingComplete(rating);
+      }).length,
+    [rows, ratings],
   );
 
   return {

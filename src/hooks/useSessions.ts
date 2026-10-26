@@ -81,8 +81,8 @@ export function useSessions({
     fetchSessions();
   }, [fetchSessions]);
 
-  // ---------- Filtered rows ----------
-  const filteredRows = useMemo(() => {
+  // ---------- Base filtered rows (everything except reviewStatus) ----------
+  const baseFilteredRows = useMemo(() => {
     const searchTerm = filters.taskSearch.trim().toLowerCase();
     return rows.filter((row) => {
       const rating = ratings[row.sessionId] || {};
@@ -98,31 +98,6 @@ export function useSessions({
       } else {
         systemMatch = row.systemRating === filters.systemRating;
       }
-
-      // Review status logic — 5-state model.
-      // Priority MUST match the stats bucketing in SessionReviewDashboard:
-      //   Submitted  >  Failed  >  Reviewed  >  In progress  >  Pending
-      // Submitted/Failed are terminal states set by the auto-rater and
-      // therefore always win over whatever the local rating object says.
-      let statusMatch = true;
-      const isEmpty = isRatingEmpty(rating);
-      const isComplete = isRatingComplete(rating);
-      const isSubmitted = row.submitted === true;
-      const isFailed = row.submitted === false;
-      const isUnclaimed = !isSubmitted && !isFailed; // auto-rater hasn't touched it
-
-      if (filters.reviewStatus === "Submitted") {
-        statusMatch = isSubmitted;
-      } else if (filters.reviewStatus === "Failed") {
-        statusMatch = isFailed;
-      } else if (filters.reviewStatus === "Reviewed") {
-        statusMatch = isUnclaimed && !isEmpty && isComplete;
-      } else if (filters.reviewStatus === "In progress") {
-        statusMatch = isUnclaimed && !isEmpty && !isComplete;
-      } else if (filters.reviewStatus === "Pending") {
-        statusMatch = isUnclaimed && isEmpty;
-      }
-      // filters.reviewStatus === "All" → statusMatch stays true
 
       // Search by task name OR email – case-insensitive
       const taskMatch =
@@ -141,11 +116,32 @@ export function useSessions({
         match(filters.environment, rating.environment) &&
         match(filters.other, rating.other) &&
         systemMatch &&
-        statusMatch &&
         taskMatch
       );
     });
   }, [rows, ratings, filters]);
+
+  // ---------- Final filtered rows (base + reviewStatus) ----------
+  const filteredRows = useMemo(() => {
+    return baseFilteredRows.filter((row) => {
+      const rating = ratings[row.sessionId] || {};
+      const isEmpty = isRatingEmpty(rating);
+      const isComplete = isRatingComplete(rating);
+      const isSubmitted = row.submitted === true;
+      const isFailed = row.submitted === false;
+      const isUnclaimed = !isSubmitted && !isFailed;
+
+      if (filters.reviewStatus === "Submitted") return isSubmitted;
+      if (filters.reviewStatus === "Failed") return isFailed;
+      if (filters.reviewStatus === "Reviewed")
+        return isUnclaimed && !isEmpty && isComplete;
+      if (filters.reviewStatus === "In progress")
+        return isUnclaimed && !isEmpty && !isComplete;
+      if (filters.reviewStatus === "Pending") return isUnclaimed && isEmpty;
+
+      return true; // "All"
+    });
+  }, [baseFilteredRows, ratings, filters.reviewStatus]);
 
   const hasActiveFilters = useMemo(
     () =>
@@ -237,16 +233,13 @@ export function useSessions({
   }, [exportEndpoint]);
 
   // ---------- reviewedCount ----------
-  // "Fully rated, regardless of submission outcome" — i.e. everything that
-  // is no longer Pending or In progress. Bucketed in the same priority order
-  // as the dashboard: Submitted > Failed > Reviewed > In progress > Pending.
   const reviewedCount = useMemo(
     () =>
       rows.filter((r) => {
-        if (r.submitted === true) return true; // submitted
-        if (r.submitted === false) return true; // failed submission (still fully rated)
+        if (r.submitted === true) return true;
+        if (r.submitted === false) return true;
         const rating = ratings[r.sessionId];
-        return rating !== undefined && isRatingComplete(rating); // reviewed, not yet submitted
+        return rating !== undefined && isRatingComplete(rating);
       }).length,
     [rows, ratings],
   );
@@ -254,6 +247,7 @@ export function useSessions({
   return {
     rows,
     filteredRows,
+    baseFilteredRows, // Exported for accurate facet counting
     ratings,
     loading,
     error,

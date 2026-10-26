@@ -1,3 +1,4 @@
+// components/SessionReviewDashboard.tsx
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Download,
@@ -39,6 +40,7 @@ const APP_NAV_OFFSET = 56;
 export function SessionReviewDashboard() {
   const {
     filteredRows,
+    baseFilteredRows, // <--- ADDED
     rows,
     ratings,
     submitRating,
@@ -220,9 +222,9 @@ export function SessionReviewDashboard() {
   const hoveredRating = hoveredRowId ? ratings[hoveredRowId] : undefined;
 
   // ----- Stats & progress (5 statuses) -----
-  // Priority: submitted > failed > reviewed > inProgress > pending.
-  // Submitted/failed are terminal states set by the auto-rater, so they win
-  // over whatever the local rating object currently says.
+  // We use baseFilteredRows so that the tab counts reflect the current
+  // intersection of *other* filters (e.g. FOV Framing) while ignoring
+  // the currently selected reviewStatus tab.
   const stats = useMemo(() => {
     let submitted = 0;
     let failed = 0;
@@ -230,7 +232,8 @@ export function SessionReviewDashboard() {
     let inProgress = 0;
     let pending = 0;
 
-    rows.forEach((row) => {
+    baseFilteredRows.forEach((row) => {
+      // <--- Changed from rows
       const rating = ratings[row.sessionId];
       if (row.submitted === true) submitted++;
       else if (row.submitted === false) failed++;
@@ -240,14 +243,14 @@ export function SessionReviewDashboard() {
     });
 
     return {
-      total: rows.length,
+      total: baseFilteredRows.length, // <--- Changed from rows.length
       submitted,
       failed,
       reviewed,
       inProgress,
       pending,
     };
-  }, [rows, ratings]);
+  }, [baseFilteredRows, ratings]); // <--- Updated deps
 
   const {
     total: totalCount,

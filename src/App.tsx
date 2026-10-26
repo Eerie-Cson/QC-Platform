@@ -1,5 +1,5 @@
 // App.tsx
-import React, { useState } from "react";
+import { useState } from "react";
 import { ListChecks, ShieldCheck } from "lucide-react";
 import { SessionReviewDashboard } from "./components/SessionReviewDashboard";
 import { CrosscheckDashboard } from "./components/CrosscheckDashboard";

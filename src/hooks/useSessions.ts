@@ -130,14 +130,16 @@ export function useSessions({
       const isSubmitted = row.submitted === true;
       const isFailed = row.submitted === false;
       const isUnclaimed = !isSubmitted && !isFailed;
+      const isDraft = (rating as any).isDraft === true; // <--- Added
 
       if (filters.reviewStatus === "Submitted") return isSubmitted;
       if (filters.reviewStatus === "Failed") return isFailed;
       if (filters.reviewStatus === "Reviewed")
-        return isUnclaimed && !isEmpty && isComplete;
+        return isUnclaimed && !isDraft && !isEmpty && isComplete;
       if (filters.reviewStatus === "In progress")
-        return isUnclaimed && !isEmpty && !isComplete;
-      if (filters.reviewStatus === "Pending") return isUnclaimed && isEmpty;
+        return isUnclaimed && (isDraft || (!isEmpty && !isComplete));
+      if (filters.reviewStatus === "Pending")
+        return isUnclaimed && !isDraft && isEmpty;
 
       return true; // "All"
     });
@@ -154,7 +156,7 @@ export function useSessions({
 
   const clearFilters = useCallback(() => setFilters(initialFilters), []);
 
-  // ---------- submitRating and exportCSV (unchanged) ----------
+  // ---------- submitRating and exportCSV ----------
   const submitRating = useCallback(
     async (
       sessionId: string,
@@ -163,10 +165,16 @@ export function useSessions({
       faceVisible?: boolean,
     ) => {
       const isEmpty = isRatingEmpty(submittedRatings);
+
+      // Extract isDraft so we don't send it to the API
+      const { isDraft, ...networkRatings } = submittedRatings as Ratings & {
+        isDraft?: boolean;
+      };
+
       const payload: any = {
         sessionId,
         faceVisible,
-        ...(isEmpty ? {} : { ratings: submittedRatings }),
+        ...(isEmpty ? {} : { ratings: networkRatings }),
       };
       if (systemRating !== undefined) {
         payload.systemRating = systemRating;
@@ -184,7 +192,7 @@ export function useSessions({
         setRatings((prev) => {
           const newRatings = { ...prev };
           if (isEmpty) delete newRatings[sessionId];
-          else newRatings[sessionId] = submittedRatings;
+          else newRatings[sessionId] = submittedRatings; // Keep isDraft locally
           return newRatings;
         });
 
@@ -239,6 +247,7 @@ export function useSessions({
         if (r.submitted === true) return true;
         if (r.submitted === false) return true;
         const rating = ratings[r.sessionId];
+        if ((rating as any)?.isDraft) return false; // Drafts are in progress
         return rating !== undefined && isRatingComplete(rating);
       }).length,
     [rows, ratings],
@@ -247,7 +256,7 @@ export function useSessions({
   return {
     rows,
     filteredRows,
-    baseFilteredRows, // Exported for accurate facet counting
+    baseFilteredRows,
     ratings,
     loading,
     error,

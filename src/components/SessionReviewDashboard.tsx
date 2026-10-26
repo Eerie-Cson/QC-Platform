@@ -40,7 +40,7 @@ const APP_NAV_OFFSET = 56;
 export function SessionReviewDashboard() {
   const {
     filteredRows,
-    baseFilteredRows, // <--- ADDED
+    baseFilteredRows,
     rows,
     ratings,
     submitRating,
@@ -121,11 +121,14 @@ export function SessionReviewDashboard() {
     submittedRatings: Ratings,
     systemRating: string,
     faceVisible?: boolean,
+    isDraft?: boolean,
   ) => {
     if (!activeRow) return;
 
     const currentSessionId = activeRow.sessionId;
-    const nextRow = autoNext ? findNextUnratedRow(currentSessionId) : undefined;
+    // Only advance if NOT a draft
+    const nextRow =
+      autoNext && !isDraft ? findNextUnratedRow(currentSessionId) : undefined;
 
     if (nextRow) {
       window.postMessage(
@@ -136,7 +139,8 @@ export function SessionReviewDashboard() {
 
     const result = await submitRating(
       currentSessionId,
-      submittedRatings,
+      // Add isDraft to the local state via ratings payload
+      { ...submittedRatings, isDraft } as Ratings,
       systemRating,
       faceVisible,
     );
@@ -154,9 +158,11 @@ export function SessionReviewDashboard() {
       window.setTimeout(() => scrollRowIntoView(nextRow.sessionId), 100);
     } else {
       showToast(
-        autoNext
-          ? `Review saved for ${activeRow.email} · all caught up`
-          : `Review saved for ${activeRow.email}`,
+        isDraft
+          ? `Draft saved for ${activeRow.email}`
+          : autoNext
+            ? `Review saved for ${activeRow.email} · all caught up`
+            : `Review saved for ${activeRow.email}`,
       );
       setActiveRow(null);
       setReviewingRowId(null);
@@ -222,9 +228,6 @@ export function SessionReviewDashboard() {
   const hoveredRating = hoveredRowId ? ratings[hoveredRowId] : undefined;
 
   // ----- Stats & progress (5 statuses) -----
-  // We use baseFilteredRows so that the tab counts reflect the current
-  // intersection of *other* filters (e.g. FOV Framing) while ignoring
-  // the currently selected reviewStatus tab.
   const stats = useMemo(() => {
     let submitted = 0;
     let failed = 0;
@@ -233,24 +236,27 @@ export function SessionReviewDashboard() {
     let pending = 0;
 
     baseFilteredRows.forEach((row) => {
-      // <--- Changed from rows
       const rating = ratings[row.sessionId];
+      const isDraft = (rating as any)?.isDraft === true;
+
       if (row.submitted === true) submitted++;
       else if (row.submitted === false) failed++;
+      else if (isDraft)
+        inProgress++; // Drafts are in progress
       else if (rating && isRatingComplete(rating)) reviewed++;
       else if (rating && !isRatingEmpty(rating)) inProgress++;
       else pending++;
     });
 
     return {
-      total: baseFilteredRows.length, // <--- Changed from rows.length
+      total: baseFilteredRows.length,
       submitted,
       failed,
       reviewed,
       inProgress,
       pending,
     };
-  }, [baseFilteredRows, ratings]); // <--- Updated deps
+  }, [baseFilteredRows, ratings]);
 
   const {
     total: totalCount,
@@ -271,20 +277,20 @@ export function SessionReviewDashboard() {
       key: "submitted",
       label: "Submitted",
       count: submittedCount,
-      bar: "bg-emerald-500",
+      bar: "bg-emerald-400",
     },
     { key: "failed", label: "Failed", count: failedCount, bar: "bg-rose-500" },
     {
       key: "reviewed",
       label: "Reviewed",
       count: reviewedCount,
-      bar: "bg-violet-500",
+      bar: "bg-emerald-800",
     },
     {
       key: "inProgress",
       label: "In progress",
       count: inProgressCount,
-      bar: "bg-blue-500",
+      bar: "bg-amber-500",
     },
     {
       key: "pending",
@@ -339,7 +345,7 @@ export function SessionReviewDashboard() {
                   }`}
                 >
                   <span
-                    className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                    className={`cursor-pointer inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
                       autoNext ? "translate-x-[18px]" : "translate-x-0.5"
                     }`}
                   />
@@ -421,12 +427,13 @@ export function SessionReviewDashboard() {
           className="sticky z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 mb-4 bg-[#F7F8FA]/90 backdrop-blur-md border-b border-slate-200/70"
           style={{ top: APP_NAV_OFFSET }}
         >
-          <div className="flex flex-col md:flex-row md:items-center gap-3">
+          {/* RESPONSIVE TOOLBAR CONTAINER */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             {/* Status segmented control — 5 states + All */}
             <div
               role="group"
               aria-label="Filter by review status"
-              className="inline-flex items-center gap-0.5 p-1 rounded-lg bg-slate-200/60 overflow-x-auto max-w-full scrollbar-hide"
+              className="flex items-center gap-0.5 p-1 rounded-lg bg-slate-200/60 overflow-x-auto scrollbar-hide w-full lg:w-auto shrink-0"
             >
               {statusTabs.map((tab) => {
                 const isActive = filters.reviewStatus === tab.key;
@@ -438,7 +445,7 @@ export function SessionReviewDashboard() {
                     onClick={() =>
                       setFilters((f) => ({ ...f, reviewStatus: tab.key }))
                     }
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 ${
+                    className={`cursor-pointer shrink-0 flex-1 lg:flex-none inline-flex justify-center items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 ${
                       isActive
                         ? "bg-white text-slate-900 shadow-sm"
                         : "text-slate-600 hover:text-slate-900"
@@ -458,8 +465,8 @@ export function SessionReviewDashboard() {
             </div>
 
             {/* Search + advanced filters */}
-            <div className="flex items-center gap-2 md:ml-auto">
-              <div className="flex-1 md:flex-none">
+            <div className="flex items-center gap-2 w-full lg:w-auto">
+              <div className="flex-1 lg:w-64 lg:flex-none">
                 <TaskSearchInput filters={filters} setFilters={setFilters} />
               </div>
               <SessionFilters
@@ -492,8 +499,9 @@ export function SessionReviewDashboard() {
                 const rating = ratings[row.sessionId];
                 const isSubmitted = row.submitted === true;
                 const isFailed = row.submitted === false;
+                const isDraft = (rating as any)?.isDraft === true;
                 const isRated =
-                  rating !== undefined && isRatingComplete(rating);
+                  rating !== undefined && isRatingComplete(rating) && !isDraft;
                 const hasRating =
                   rating !== undefined && !isRatingEmpty(rating);
                 const isButtonDone = isSubmitted || isRated;
@@ -594,6 +602,7 @@ export function SessionReviewDashboard() {
                         isFailed={isFailed}
                         isRated={isRated}
                         hasRating={hasRating}
+                        isDraft={isDraft}
                       />
                     </td>
                     <td className="px-5 py-4">
@@ -660,7 +669,9 @@ export function SessionReviewDashboard() {
             const rating = ratings[row.sessionId];
             const isSubmitted = row.submitted === true;
             const isFailed = row.submitted === false;
-            const isRated = rating !== undefined && isRatingComplete(rating);
+            const isDraft = (rating as any)?.isDraft === true;
+            const isRated =
+              rating !== undefined && isRatingComplete(rating) && !isDraft;
             const hasRating = rating !== undefined && !isRatingEmpty(rating);
             const isButtonDone = isSubmitted || isRated;
             const isHighlighted = reviewingRowId === row.sessionId;
@@ -727,6 +738,7 @@ export function SessionReviewDashboard() {
                       isFailed={isFailed}
                       isRated={isRated}
                       hasRating={hasRating}
+                      isDraft={isDraft}
                       compact
                     />
                   </div>
@@ -824,7 +836,7 @@ export function SessionReviewDashboard() {
       {firstUnratedRow && !isUnratedVisible && !activeRow && (
         <button
           onClick={handleScrollToUnrated}
-          className="fixed bottom-6 right-6 z-30 inline-flex items-center gap-2 pl-3.5 pr-4 py-2.5 rounded-full bg-blue-600 text-white text-sm font-medium shadow-lg shadow-blue-900/20 hover:bg-blue-700 active:bg-blue-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 focus-visible:ring-offset-2"
+          className="cursor-pointer fixed bottom-6 right-6 z-30 inline-flex items-center gap-2 pl-3.5 pr-4 py-2.5 rounded-full bg-blue-600 text-white text-sm font-medium shadow-lg shadow-blue-900/20 hover:bg-blue-700 active:bg-blue-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 focus-visible:ring-offset-2"
         >
           <LocateFixed size={15} />
           Jump to unrated
@@ -894,23 +906,24 @@ function StatusBadge({
   isFailed,
   isRated,
   hasRating,
+  isDraft = false,
   compact = false,
 }: {
   isSubmitted: boolean;
   isFailed: boolean;
   isRated: boolean;
   hasRating: boolean;
+  isDraft?: boolean;
   compact?: boolean;
 }) {
   const size = compact ? 12 : 13;
   const base = compact
     ? "inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium whitespace-nowrap"
     : "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap";
-
   if (isSubmitted) {
     return (
       <span
-        className={`${base} text-emerald-700 bg-emerald-50 border border-emerald-200`}
+        className={`${base} text-emerald-600 bg-emerald-50 border border-emerald-200`}
       >
         <Send size={size} /> Submitted
       </span>
@@ -925,10 +938,19 @@ function StatusBadge({
       </span>
     );
   }
+  if (isDraft) {
+    return (
+      <span
+        className={`${base}  text-amber-700 bg-amber-50 border border-amber-200`}
+      >
+        <AlertTriangle size={size} /> In progress
+      </span>
+    );
+  }
   if (isRated) {
     return (
       <span
-        className={`${base} text-violet-700 bg-violet-50 border border-violet-200`}
+        className={`${base} text-teal-800 bg-teal-50 border border-teal-200`}
       >
         <CheckCircle2 size={size} /> Reviewed
       </span>
@@ -943,6 +965,7 @@ function StatusBadge({
       </span>
     );
   }
+
   return (
     <span
       className={`${base} text-slate-500 bg-slate-100 border border-slate-200`}

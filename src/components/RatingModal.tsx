@@ -215,6 +215,7 @@ interface RatingModalProps {
     rating: Ratings,
     systemRating: string,
     faceVisible: boolean,
+    isDraft?: boolean,
   ) => void;
   mode: "review" | "crosscheck";
   autoNext: boolean;
@@ -545,16 +546,20 @@ export function RatingModal({
     return majorKeys.join("_");
   };
 
-  const handleSubmitClick = () => {
-    // Special case: midcitigarments and major issue
-    if (row.email === "accounts@midcitigarments.com" && hasMajorIssue(rating)) {
+  const handleSubmitClick = (isDraft = false) => {
+    // Special case: midcitigarments and major issue (only trigger on final submit)
+    if (
+      !isDraft &&
+      row.email === "accounts@midcitigarments.com" &&
+      hasMajorIssue(rating)
+    ) {
       const majorFields = getMajorFieldsString(rating);
       const copyText = `${row.sessionId}_${majorFields}`;
       navigator.clipboard.writeText(copyText).catch(console.error);
       setShowMidciDialog(true);
       return;
     }
-    onSubmit(rating, systemRating, faceVisible);
+    onSubmit(rating, systemRating, faceVisible, isDraft);
   };
 
   const handleSubmitClickRef = useRef(handleSubmitClick);
@@ -574,7 +579,8 @@ export function RatingModal({
 
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
-        handleSubmitClickRef.current();
+        // If complete (or crosscheck), Enter submits. If incomplete, it saves draft.
+        handleSubmitClickRef.current(!complete && !isCrosscheck);
       }
 
       // Navigation Shortcuts
@@ -589,7 +595,15 @@ export function RatingModal({
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [showOrientationDialog, onClose, hasPrev, hasNext, onNavigate]);
+  }, [
+    showOrientationDialog,
+    onClose,
+    hasPrev,
+    hasNext,
+    onNavigate,
+    complete,
+    isCrosscheck,
+  ]);
 
   const handleCopyOriginal = () => {
     navigator.clipboard.writeText(originalComment);
@@ -1217,20 +1231,30 @@ export function RatingModal({
 
           {/* Actions */}
           <div className="flex items-center gap-2">
+            {!isCrosscheck && (
+              <button
+                onClick={() => handleSubmitClick(true)}
+                className={BTN_GHOST}
+                title="Save progress without submitting"
+              >
+                Save draft
+              </button>
+            )}
             <button
-              onClick={handleSubmitClick}
-              title="Ctrl/⌘ + Enter"
+              onClick={() => handleSubmitClick(false)}
+              disabled={!isCrosscheck && !complete}
+              title={
+                !isCrosscheck && !complete
+                  ? "Fill in every field to submit"
+                  : "Ctrl/⌘ + Enter"
+              }
               className={
                 isCrosscheck || complete
                   ? BTN_PRIMARY
-                  : `px-3.5 py-2 rounded-lg text-sm font-medium bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 transition-colors ${FOCUS_RING}`
+                  : `px-3.5 py-2 rounded-lg text-sm font-medium bg-slate-100 text-slate-400 cursor-not-allowed transition-colors`
               }
             >
-              {isCrosscheck
-                ? "Save crosscheck"
-                : complete
-                  ? "Submit review"
-                  : "Save draft"}
+              {isCrosscheck ? "Save crosscheck" : "Submit review"}
             </button>
           </div>
         </div>
@@ -1267,7 +1291,7 @@ export function RatingModal({
               <button
                 onClick={() => {
                   setShowMidciDialog(false);
-                  onSubmit(rating, systemRating, faceVisible);
+                  onSubmit(rating, systemRating, faceVisible, false);
                 }}
                 className={BTN_GHOST}
               >
@@ -1280,7 +1304,7 @@ export function RatingModal({
                     { type: "OPEN_VIDEO_IN_SPLIT", url: row.link },
                     "*",
                   );
-                  onSubmit(rating, systemRating, faceVisible);
+                  onSubmit(rating, systemRating, faceVisible, false);
                 }}
                 className={BTN_PRIMARY}
               >

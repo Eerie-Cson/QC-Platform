@@ -321,13 +321,11 @@ export function RatingModal({
   // ---- Focus Restoration when returning to tab ----
   useEffect(() => {
     const handleWindowFocus = () => {
-      // If readOnly, just grab focus to the modal container
       if (readOnly) {
         if (modalRef.current) modalRef.current.focus();
         return;
       }
 
-      // Small timeout allows browser native focus behavior to finish
       const timer = setTimeout(() => {
         if (
           lastActiveElementRef.current &&
@@ -488,6 +486,26 @@ export function RatingModal({
     setCommentManuallyEdited(false);
   };
 
+  // Helper for the new preset shortcuts
+  const handlePresetScenario = (commentText: string) => {
+    if (readOnly) return;
+    setRating((prev) => ({
+      ...prev,
+      lighting: Severity.NoIssue,
+      sharpness: Severity.NoIssue,
+      handVisibility: Severity.NoIssue,
+      fovFraming: Severity.NoIssue,
+      cameraAngle: Severity.NoIssue,
+      idle: Severity.NoIssue,
+      seated: Seated.StandingMoving,
+      environment: Environment.CorrectTask,
+      other: Severity.Major,
+      slowLoading: false,
+      comment: commentText,
+    }));
+    setCommentManuallyEdited(true); // Prevent auto-generation from overwriting
+  };
+
   const complete = isRatingComplete(rating);
 
   useEffect(() => {
@@ -614,18 +632,73 @@ export function RatingModal({
     handleSubmitClickRef.current = handleSubmitClick;
   });
 
+  // ---- STABLE EVENT LISTENER ----
+  const stateRef = useRef({
+    rating,
+    complete,
+    faceVisible,
+    showOrientationDialog,
+    showMidciDialog,
+    isCrosscheck,
+    readOnly,
+    hasPrev,
+    hasNext,
+    update,
+    handleSetAllNoIssue,
+    handleClearRating,
+    handleFaceVisibleChange,
+    handlePresetScenario,
+    onNavigate,
+    onClose,
+    rowLink: row.link,
+    showCommentBox,
+    isApproved,
+  });
+
+  useEffect(() => {
+    stateRef.current = {
+      rating,
+      complete,
+      faceVisible,
+      showOrientationDialog,
+      showMidciDialog,
+      isCrosscheck,
+      readOnly,
+      hasPrev,
+      hasNext,
+      update,
+      handleSetAllNoIssue,
+      handleClearRating,
+      handleFaceVisibleChange,
+      handlePresetScenario,
+      onNavigate,
+      onClose,
+      rowLink: row.link,
+      showCommentBox,
+      isApproved,
+    };
+  });
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const s = stateRef.current;
+
+      // Escape logic
       if (e.key === "Escape") {
-        if (showOrientationDialog) {
+        if (s.showOrientationDialog) {
           setShowOrientationDialog(false);
+        } else if (s.showMidciDialog) {
+          setShowMidciDialog(false);
         } else {
-          onClose();
+          s.onClose();
         }
         return;
       }
 
-      // Submit shortcuts: Ctrl+Enter, Ctrl+Shift+S, or Alt+Enter
+      // Block all other shortcuts if a dialog is open
+      if (s.showOrientationDialog || s.showMidciDialog) return;
+
+      // Submit shortcuts
       const isSubmitShortcut =
         ((e.ctrlKey || e.metaKey) && e.key === "Enter") ||
         ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === "KeyS") ||
@@ -633,20 +706,47 @@ export function RatingModal({
 
       if (isSubmitShortcut) {
         e.preventDefault();
-        if (readOnly) return;
-        handleSubmitClickRef.current(!complete && !isCrosscheck);
+        if (s.readOnly) return;
+        handleSubmitClickRef.current(!s.complete && !s.isCrosscheck);
         return;
       }
 
       // Ctrl+Shift+F to open footage
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === "KeyF") {
         e.preventDefault();
-        window.postMessage({ type: "OPEN_VIDEO_IN_SPLIT", url: row.link }, "*");
+        window.postMessage(
+          { type: "OPEN_VIDEO_IN_SPLIT", url: s.rowLink },
+          "*",
+        );
         return;
       }
 
+      // Preset Scenarios: Alt + Shift + 1/2/3
+      if (e.altKey && e.shiftKey && e.code.startsWith("Digit")) {
+        if (s.readOnly) return;
+        if (e.code === "Digit1") {
+          e.preventDefault();
+          s.handlePresetScenario(
+            "Major Other Issue - Any task performed in residential area will be treated as fraud.",
+          );
+          return;
+        } else if (e.code === "Digit2") {
+          e.preventDefault();
+          s.handlePresetScenario(
+            "Major Other Issue - Camera setup that are non-head mounted will be treated as fraud",
+          );
+          return;
+        } else if (e.code === "Digit3") {
+          e.preventDefault();
+          s.handlePresetScenario(
+            "Major Other Issue - An object or the part of the object is extremely close to the camera lens, obstructing a portion of the frame will be flagged as fraud.",
+          );
+          return;
+        }
+      }
+
       // Alt + 1-9 (Maps to specific fields using e.code)
-      if (e.altKey && e.code.startsWith("Digit") && !readOnly) {
+      if (e.altKey && e.code.startsWith("Digit") && !s.readOnly) {
         const num = e.code.replace("Digit", "");
         const fieldMap: Record<
           string,
@@ -666,7 +766,7 @@ export function RatingModal({
         const mapping = fieldMap[num];
         if (mapping) {
           e.preventDefault();
-          const currentValue = rating[mapping.key];
+          const currentValue = s.rating[mapping.key];
           const options = mapping.options;
           let nextValue;
 
@@ -674,7 +774,6 @@ export function RatingModal({
             nextValue = options[0];
           } else {
             const idx = options.indexOf(currentValue as string);
-            // If at the last option, clear the rating
             if (idx === options.length - 1) {
               nextValue = "";
             } else {
@@ -682,67 +781,64 @@ export function RatingModal({
             }
           }
 
-          update(mapping.key, nextValue as any);
+          s.update(mapping.key, nextValue as any);
         }
         return;
       }
 
       // Other Alt Shortcuts
-      if (e.altKey && !readOnly) {
+      if (e.altKey && !s.readOnly) {
         if (e.code === "ArrowLeft") {
           e.preventDefault();
-          if (hasPrev) onNavigate("prev");
+          if (s.hasPrev) s.onNavigate("prev");
         } else if (e.code === "ArrowRight") {
           e.preventDefault();
-          if (hasNext) onNavigate("next");
+          if (s.hasNext) s.onNavigate("next");
         } else if (e.code === "KeyA") {
           e.preventDefault();
-          handleSetAllNoIssue();
+          s.handleSetAllNoIssue();
         } else if (e.code === "KeyC") {
           e.preventDefault();
-          handleClearRating();
+          s.handleClearRating();
         } else if (e.code === "KeyF") {
           e.preventDefault();
-          handleFaceVisibleChange(!faceVisible);
+          s.handleFaceVisibleChange(!s.faceVisible);
         } else if (e.code === "KeyL") {
           e.preventDefault();
-          update("slowLoading", !rating.slowLoading);
+          s.update("slowLoading", !s.rating.slowLoading);
+        } else if (e.code === "KeyS") {
+          // Save draft / skip (review mode only – crosscheck has no draft state)
+          if (!s.isCrosscheck) {
+            e.preventDefault();
+            handleSubmitClickRef.current(true);
+          }
         } else if (e.code === "KeyM") {
           e.preventDefault();
-          // Focus the comment field
-          if (isCrosscheck) {
-            if (!showCommentBox && !isApproved) {
-              toggleCommentBox();
-            } else if (showCommentBox) {
-              crosscheckCommentRef.current?.focus();
+          if (s.isCrosscheck) {
+            if (!s.showCommentBox && !s.isApproved) {
+              setShowCommentBox(true);
+              setTimeout(() => crosscheckCommentRef.current?.focus(), 100);
+            } else if (s.showCommentBox) {
+              if (document.activeElement === crosscheckCommentRef.current) {
+                modalRef.current?.focus();
+              } else {
+                crosscheckCommentRef.current?.focus();
+              }
             }
           } else {
-            commentRef.current?.focus();
+            if (document.activeElement === commentRef.current) {
+              modalRef.current?.focus();
+            } else {
+              commentRef.current?.focus();
+            }
           }
         }
       }
     };
+
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [
-    showOrientationDialog,
-    onClose,
-    hasPrev,
-    hasNext,
-    onNavigate,
-    complete,
-    isCrosscheck,
-    readOnly,
-    rating,
-    faceVisible,
-    update,
-    handleSetAllNoIssue,
-    handleClearRating,
-    handleFaceVisibleChange,
-    row.link,
-    showCommentBox,
-    isApproved,
-  ]);
+  }, []); // <-- Empty array! The listener is only attached once.
 
   const handleCopyOriginal = () => {
     navigator.clipboard.writeText(originalComment);
@@ -815,7 +911,6 @@ export function RatingModal({
         ref={modalRef}
         tabIndex={-1}
         onFocus={(e) => {
-          // Keep track of the last focused element inside the modal
           if (modalRef.current?.contains(e.target as Node)) {
             lastActiveElementRef.current = e.target as HTMLElement;
           }
@@ -1043,7 +1138,7 @@ export function RatingModal({
                       tone="severity"
                       disabled={readOnly}
                       compact
-                      title="Toggle Other (Alt+9)"
+                      title="Toggle Other (Alt+9). Presets: Alt+Shift+1 (Residential), Alt+Shift+2 (Non-head mounted), Alt+Shift+3 (Object close)"
                     />
                   </div>
                 </div>
@@ -1506,9 +1601,13 @@ export function RatingModal({
                   <button
                     onClick={() => handleSubmitClick(true)}
                     className={BTN_GHOST}
-                    title="Save progress without submitting (Alt+S)"
+                    title={
+                      complete
+                        ? "Skip this session without submitting (Alt+S)"
+                        : "Save progress without submitting (Alt+S)"
+                    }
                   >
-                    Save draft
+                    {complete ? "Skip" : "Save draft"}
                   </button>
                 )}
                 <button

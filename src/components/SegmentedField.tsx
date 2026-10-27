@@ -11,6 +11,7 @@ interface SegmentedFieldProps<T extends string> {
   disabled?: boolean;
   displayMap?: Record<string, string>;
   compact?: boolean;
+  title?: string;
 }
 
 export function SegmentedField<T extends string>({
@@ -23,6 +24,7 @@ export function SegmentedField<T extends string>({
   disabled = false,
   displayMap,
   compact = false,
+  title,
 }: SegmentedFieldProps<T>) {
   return (
     <div className="space-y-1.5">
@@ -63,6 +65,7 @@ export function SegmentedField<T extends string>({
                 else onChange(opt);
               }}
               disabled={disabled}
+              title={title}
               style={{ fontFamily: FONT_UI }}
               className={`${compact ? "px-3 py-1.5 text-xs" : "px-3.5 py-2 text-[13px]"} rounded-lg font-medium border transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 ${stateClass} ${
                 disabled

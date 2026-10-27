@@ -285,9 +285,14 @@ export function RatingModal({
   const [systemRating, setSystemRating] = useState(row.systemRating || "");
   const [showMidciDialog, setShowMidciDialog] = useState(false);
   const [copiedSessionId, setCopiedSessionId] = useState(false);
-  const [commentCopied, setCommentCopied] = useState(false); // ← new
+  const [commentCopied, setCommentCopied] = useState(false);
+
   const commentRef = useRef<HTMLTextAreaElement>(null);
   const crosscheckCommentRef = useRef<HTMLTextAreaElement>(null);
+
+  // Refs for focus restoration
+  const modalRef = useRef<HTMLDivElement>(null);
+  const lastActiveElementRef = useRef<HTMLElement | null>(null);
 
   const isCrosscheck = mode === "crosscheck";
   const originalComment = initial?.comment || "";
@@ -312,6 +317,34 @@ export function RatingModal({
       setShowCommentBox(true);
     }
   }, [isCrosscheck, crosscheckComment, isApproved]);
+
+  // ---- Focus Restoration when returning to tab ----
+  useEffect(() => {
+    const handleWindowFocus = () => {
+      // If readOnly, just grab focus to the modal container
+      if (readOnly) {
+        if (modalRef.current) modalRef.current.focus();
+        return;
+      }
+
+      // Small timeout allows browser native focus behavior to finish
+      const timer = setTimeout(() => {
+        if (
+          lastActiveElementRef.current &&
+          document.body.contains(lastActiveElementRef.current)
+        ) {
+          lastActiveElementRef.current.focus();
+        } else if (modalRef.current) {
+          modalRef.current.focus();
+        }
+      }, 50);
+
+      return () => clearTimeout(timer);
+    };
+
+    window.addEventListener("focus", handleWindowFocus);
+    return () => window.removeEventListener("focus", handleWindowFocus);
+  }, [readOnly]);
 
   const handleFaceVisibleChange = (checked: boolean) => {
     if (readOnly) return;
@@ -589,21 +622,104 @@ export function RatingModal({
         } else {
           onClose();
         }
+        return;
       }
 
-      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      // Submit shortcuts: Ctrl+Enter, Ctrl+Shift+S, or Alt+Enter
+      const isSubmitShortcut =
+        ((e.ctrlKey || e.metaKey) && e.key === "Enter") ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === "KeyS") ||
+        (e.altKey && e.code === "Enter");
+
+      if (isSubmitShortcut) {
         e.preventDefault();
         if (readOnly) return;
         handleSubmitClickRef.current(!complete && !isCrosscheck);
+        return;
       }
 
-      if (e.altKey && e.key === "ArrowLeft") {
+      // Ctrl+Shift+F to open footage
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === "KeyF") {
         e.preventDefault();
-        if (hasPrev) onNavigate("prev");
+        window.postMessage({ type: "OPEN_VIDEO_IN_SPLIT", url: row.link }, "*");
+        return;
       }
-      if (e.altKey && e.key === "ArrowRight") {
-        e.preventDefault();
-        if (hasNext) onNavigate("next");
+
+      // Alt + 1-9 (Maps to specific fields using e.code)
+      if (e.altKey && e.code.startsWith("Digit") && !readOnly) {
+        const num = e.code.replace("Digit", "");
+        const fieldMap: Record<
+          string,
+          { key: keyof Ratings; options: string[] }
+        > = {
+          "1": { key: "lighting", options: SEVERITY_OPTIONS },
+          "2": { key: "sharpness", options: SEVERITY_OPTIONS },
+          "3": { key: "handVisibility", options: SEVERITY_OPTIONS },
+          "4": { key: "fovFraming", options: SEVERITY_OPTIONS },
+          "5": { key: "cameraAngle", options: SEVERITY_OPTIONS },
+          "6": { key: "idle", options: SEVERITY_OPTIONS },
+          "7": { key: "seated", options: SEATED_OPTIONS },
+          "8": { key: "environment", options: ENVIRONMENT_OPTIONS },
+          "9": { key: "other", options: OTHER_OPTIONS },
+        };
+
+        const mapping = fieldMap[num];
+        if (mapping) {
+          e.preventDefault();
+          const currentValue = rating[mapping.key];
+          const options = mapping.options;
+          let nextValue;
+
+          if (!currentValue) {
+            nextValue = options[0];
+          } else {
+            const idx = options.indexOf(currentValue as string);
+            // If at the last option, clear the rating
+            if (idx === options.length - 1) {
+              nextValue = "";
+            } else {
+              nextValue = options[idx + 1];
+            }
+          }
+
+          update(mapping.key, nextValue as any);
+        }
+        return;
+      }
+
+      // Other Alt Shortcuts
+      if (e.altKey && !readOnly) {
+        if (e.code === "ArrowLeft") {
+          e.preventDefault();
+          if (hasPrev) onNavigate("prev");
+        } else if (e.code === "ArrowRight") {
+          e.preventDefault();
+          if (hasNext) onNavigate("next");
+        } else if (e.code === "KeyA") {
+          e.preventDefault();
+          handleSetAllNoIssue();
+        } else if (e.code === "KeyC") {
+          e.preventDefault();
+          handleClearRating();
+        } else if (e.code === "KeyF") {
+          e.preventDefault();
+          handleFaceVisibleChange(!faceVisible);
+        } else if (e.code === "KeyL") {
+          e.preventDefault();
+          update("slowLoading", !rating.slowLoading);
+        } else if (e.code === "KeyM") {
+          e.preventDefault();
+          // Focus the comment field
+          if (isCrosscheck) {
+            if (!showCommentBox && !isApproved) {
+              toggleCommentBox();
+            } else if (showCommentBox) {
+              crosscheckCommentRef.current?.focus();
+            }
+          } else {
+            commentRef.current?.focus();
+          }
+        }
       }
     };
     document.addEventListener("keydown", handleKeyDown);
@@ -617,13 +733,21 @@ export function RatingModal({
     complete,
     isCrosscheck,
     readOnly,
+    rating,
+    faceVisible,
+    update,
+    handleSetAllNoIssue,
+    handleClearRating,
+    handleFaceVisibleChange,
+    row.link,
+    showCommentBox,
+    isApproved,
   ]);
 
   const handleCopyOriginal = () => {
     navigator.clipboard.writeText(originalComment);
   };
 
-  // ← new
   const handleCopyComment = () => {
     const text = rating.comment || "";
     if (!text) return;
@@ -688,10 +812,18 @@ export function RatingModal({
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 p-0 sm:p-4">
       <div
+        ref={modalRef}
+        tabIndex={-1}
+        onFocus={(e) => {
+          // Keep track of the last focused element inside the modal
+          if (modalRef.current?.contains(e.target as Node)) {
+            lastActiveElementRef.current = e.target as HTMLElement;
+          }
+        }}
         role="dialog"
         aria-modal="true"
         aria-labelledby="rating-modal-title"
-        className="w-full sm:max-w-2xl bg-white rounded-t-2xl sm:rounded-2xl shadow-xl max-h-[95vh] flex flex-col border border-slate-200"
+        className="w-full sm:max-w-2xl bg-white rounded-t-2xl sm:rounded-2xl shadow-xl max-h-[95vh] flex flex-col border border-slate-200 focus:outline-none"
         style={{ fontFamily: FONT_UI }}
       >
         {/* ───────── Header ───────── */}
@@ -738,7 +870,7 @@ export function RatingModal({
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={handleOpenSplit}
-                  title="Open session link in split view"
+                  title="Open session link in split view (Ctrl+Shift+F)"
                   className={`inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 bg-white border border-slate-200 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-colors cursor-pointer ${FOCUS_RING}`}
                 >
                   <ExternalLink size={15} />
@@ -837,7 +969,7 @@ export function RatingModal({
                       <button
                         type="button"
                         onClick={handleSetAllNoIssue}
-                        title="Set all fields to No issue"
+                        title="Set all fields to No issue (Alt+A)"
                         className={`inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer ${FOCUS_RING}`}
                       >
                         <CheckCheck size={14} />
@@ -847,7 +979,7 @@ export function RatingModal({
                       <button
                         type="button"
                         onClick={handleClearRating}
-                        title="Clear all rating fields"
+                        title="Clear all rating fields (Alt+C)"
                         className={`inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-rose-700 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer ${FOCUS_RING}`}
                       >
                         <Trash2 size={14} />
@@ -856,18 +988,22 @@ export function RatingModal({
                     ))}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
-                  {SEVERITY_FIELDS.map((f) => (
-                    <SegmentedField<Severity>
-                      key={f.key}
-                      label={f.label}
-                      options={SEVERITY_OPTIONS}
-                      value={rating[f.key] || undefined}
-                      onChange={(v) => update(f.key, v || "")}
-                      tone="severity"
-                      disabled={readOnly}
-                      compact
-                    />
-                  ))}
+                  {SEVERITY_FIELDS.map((f, index) => {
+                    const shortcutNum = (index + 1).toString();
+                    return (
+                      <SegmentedField<Severity>
+                        key={f.key}
+                        label={f.label}
+                        options={SEVERITY_OPTIONS}
+                        value={rating[f.key] || undefined}
+                        onChange={(v) => update(f.key, v || "")}
+                        tone="severity"
+                        disabled={readOnly}
+                        compact
+                        title={`Toggle ${f.label} (Alt+${shortcutNum})`}
+                      />
+                    );
+                  })}
                 </div>
               </div>
 
@@ -884,6 +1020,7 @@ export function RatingModal({
                     styleMap={SEATED_STYLE_MAP}
                     disabled={readOnly}
                     compact
+                    title="Toggle Seated (Alt+7)"
                   />
 
                   <SegmentedField<Environment>
@@ -894,6 +1031,7 @@ export function RatingModal({
                     styleMap={ENVIRONMENT_STYLE_MAP}
                     disabled={readOnly}
                     compact
+                    title="Toggle Environment (Alt+8)"
                   />
 
                   <div className="sm:col-span-2">
@@ -905,6 +1043,7 @@ export function RatingModal({
                       tone="severity"
                       disabled={readOnly}
                       compact
+                      title="Toggle Other (Alt+9)"
                     />
                   </div>
                 </div>
@@ -913,7 +1052,11 @@ export function RatingModal({
               <div className={`${sectionDivider} space-y-3`}>
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <label htmlFor="rating-comment" className={FIELD_LABEL}>
+                    <label
+                      htmlFor="rating-comment"
+                      className={FIELD_LABEL}
+                      title="Focus comments (Alt+M)"
+                    >
                       Comments
                     </label>
                     <button
@@ -938,6 +1081,7 @@ export function RatingModal({
                     value={rating.comment || ""}
                     onChange={(e) => update("comment", e.target.value)}
                     placeholder="Add any additional notes…"
+                    title="Focus comments (Alt+M)"
                     style={{ fontFamily: FONT_UI }}
                     className={`${TEXT_INPUT} resize-y min-h-[40px]`}
                     rows={2}
@@ -948,6 +1092,7 @@ export function RatingModal({
                 <div className="flex flex-wrap items-center justify-end gap-x-5 gap-y-2">
                   <label
                     htmlFor="slowLoading"
+                    title="Toggle Slow loading (Alt+L)"
                     className={`inline-flex items-center gap-2 text-sm text-slate-600 select-none ${
                       readOnly ? "opacity-60" : "cursor-pointer"
                     }`}
@@ -964,6 +1109,7 @@ export function RatingModal({
                   </label>
                   <label
                     htmlFor="faceVisible"
+                    title="Toggle Faces visible (Alt+F)"
                     className={`inline-flex items-center gap-2 text-sm text-slate-600 select-none ${
                       readOnly ? "opacity-60" : "cursor-pointer"
                     }`}
@@ -1204,6 +1350,7 @@ export function RatingModal({
                             <label
                               htmlFor="crosscheck-comment"
                               className={FIELD_LABEL}
+                              title="Focus comments (Alt+M)"
                             >
                               Your crosscheck comment
                             </label>
@@ -1236,6 +1383,7 @@ export function RatingModal({
                               update("crosscheckComment", e.target.value)
                             }
                             placeholder="Add your review notes, strike through parts you disagree with…"
+                            title="Focus comments (Alt+M)"
                             style={{ fontFamily: FONT_UI }}
                             className={`${TEXT_INPUT} resize-y min-h-[60px]`}
                             rows={3}
@@ -1358,7 +1506,7 @@ export function RatingModal({
                   <button
                     onClick={() => handleSubmitClick(true)}
                     className={BTN_GHOST}
-                    title="Save progress without submitting"
+                    title="Save progress without submitting (Alt+S)"
                   >
                     Save draft
                   </button>
@@ -1368,8 +1516,8 @@ export function RatingModal({
                   disabled={!isCrosscheck && !complete}
                   title={
                     !isCrosscheck && !complete
-                      ? "Fill in every field to submit"
-                      : "Ctrl/⌘ + Enter"
+                      ? "Fill in every field to submit (Ctrl+Shift+S or Alt+Enter)"
+                      : "Submit (Ctrl+Enter, Ctrl+Shift+S, or Alt+Enter)"
                   }
                   className={
                     isCrosscheck || complete

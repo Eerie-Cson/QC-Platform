@@ -42,6 +42,9 @@ export interface SessionRow {
   submitted?: boolean;
   submittedAt?: string;
   ratedAt?: string;
+
+  resolved?: boolean;
+  resolvedAt?: string;
 }
 
 export type Ratings = {

@@ -137,14 +137,14 @@ function HistoryRow({
           <button
             type="submit"
             disabled={!canSave}
-            className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
+            className="cursor-pointer px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
           >
             {saving ? "Saving…" : "Save"}
           </button>
           <button
             type="button"
             onClick={() => setEditing(false)}
-            className="px-2 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+            className="cursor-pointer px-2 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-50"
           >
             Cancel
           </button>
@@ -165,7 +165,7 @@ function HistoryRow({
           <button
             type="button"
             onClick={start}
-            className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-blue-600 hover:bg-blue-50"
+            className="cursor-pointer px-2.5 py-1.5 rounded-lg text-xs font-medium text-blue-600 hover:bg-blue-50"
           >
             Edit
           </button>
@@ -239,7 +239,7 @@ function AllDatesModal({
             type="button"
             onClick={() => onClose(changed.current)}
             aria-label="Close"
-            className="p-1.5 -mr-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50"
+            className="cursor-pointer p-1.5 -mr-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50"
           >
             <X size={16} />
           </button>
@@ -431,7 +431,7 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-controls="daily-tracker-body"
-        className="w-full flex items-center justify-between gap-4 px-5 py-3.5 text-left rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40"
+        className="cursor-pointer w-full flex items-center justify-between gap-4 px-5 py-3.5 text-left rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40"
       >
         <div className="flex items-baseline gap-3 min-w-0">
           <h2
@@ -523,7 +523,7 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
                       onClick={() => step(-1)}
                       disabled={valid ? parsed <= 0 : savedCount <= 0}
                       aria-label="Decrease"
-                      className="p-2.5 text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-l-lg disabled:opacity-30 disabled:hover:bg-transparent"
+                      className="cursor-pointer p-2.5 text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-l-lg disabled:opacity-30 disabled:hover:bg-transparent"
                     >
                       <Minus size={14} />
                     </button>
@@ -547,7 +547,7 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
                       onClick={() => step(1)}
                       disabled={valid ? parsed >= MAX_COUNT : false}
                       aria-label="Increase"
-                      className="p-2.5 text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-r-lg disabled:opacity-30 disabled:hover:bg-transparent"
+                      className="cursor-pointer p-2.5 text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-r-lg disabled:opacity-30 disabled:hover:bg-transparent"
                     >
                       <Plus size={14} />
                     </button>
@@ -556,7 +556,7 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
                   <button
                     type="submit"
                     disabled={!canSave}
-                    className="px-4 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 active:bg-blue-800 transition-colors shadow-sm shadow-blue-600/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:bg-blue-600"
+                    className="cursor-pointer px-4 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 active:bg-blue-800 transition-colors shadow-sm shadow-blue-600/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:bg-blue-600"
                   >
                     {status === "saving" ? "Saving…" : "Save"}
                   </button>
@@ -600,7 +600,7 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
                           added !== 0 ? `, ${signed(added)} added manually` : ""
                         }`}
                         title={full}
-                        className={`flex flex-col gap-1.5 rounded-lg border px-2.5 py-2.5 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 ${
+                        className={`cursor-pointer flex flex-col gap-1.5 rounded-lg border px-2.5 py-2.5 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 ${
                           isSelected
                             ? "bg-blue-50 border-blue-300"
                             : "bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300"
@@ -670,7 +670,7 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
                 <button
                   type="button"
                   onClick={() => setHistoryOpen(true)}
-                  className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40"
+                  className="cursor-pointer inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40"
                 >
                   <CalendarDays size={15} />
                   View all dates

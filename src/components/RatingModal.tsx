@@ -15,6 +15,7 @@ import {
   Trash2,
   ChevronLeft,
   ChevronRight,
+  Lock,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
@@ -58,7 +59,7 @@ const FIELD_LABEL = "block text-xs font-medium text-slate-500";
 const FOCUS_RING =
   "cursor-pointer disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40";
 const TEXT_INPUT =
-  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-400 transition-colors";
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-400 transition-colors disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed";
 
 function Notice({
   tone,
@@ -118,6 +119,7 @@ function ConfirmDialog({
 
 const BTN_GHOST = `px-3.5 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors ${FOCUS_RING}`;
 const BTN_PRIMARY = `px-3.5 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 transition-colors shadow-sm shadow-blue-600/20 ${FOCUS_RING}`;
+const NAV_ARROW = `inline-flex items-center justify-center w-7 h-7 rounded-md text-slate-600 hover:bg-white hover:text-slate-900 hover:shadow-sm disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:shadow-none transition-colors ${FOCUS_RING}`;
 
 // ---------------------------------------------------------------------------
 // DropdownField – compact version for crosscheck
@@ -128,6 +130,7 @@ interface DropdownFieldProps<T extends string> {
   value: T | "" | undefined;
   onChange: (value: T | "" | undefined) => void;
   styleMap: Record<string, string>;
+  disabled?: boolean;
 }
 
 function DropdownField<T extends string>({
@@ -136,6 +139,7 @@ function DropdownField<T extends string>({
   value,
   onChange,
   styleMap,
+  disabled = false,
 }: DropdownFieldProps<T>) {
   const selectedClass =
     value && styleMap[value] ? styleMap[value] : "border-slate-200 bg-white";
@@ -151,7 +155,8 @@ function DropdownField<T extends string>({
           const val = e.target.value;
           onChange(val === "" ? undefined : (val as T));
         }}
-        className={`w-full cursor-pointer rounded-lg border px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-400 transition-colors ${selectedClass}`}
+        disabled={disabled}
+        className={`w-full cursor-pointer rounded-lg border px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-400 transition-colors disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed ${selectedClass}`}
         style={{ fontFamily: FONT_UI }}
       >
         <option value="">–</option>
@@ -166,7 +171,7 @@ function DropdownField<T extends string>({
 }
 
 // ---------------------------------------------------------------------------
-// Dropdown style maps for crosscheck (green/amber/rose)
+// Dropdown style maps for crosscheck
 // ---------------------------------------------------------------------------
 const SEVERITY_DROPDOWN_STYLES: Record<string, string> = {
   [Severity.NoIssue]:
@@ -218,11 +223,14 @@ interface RatingModalProps {
     isDraft?: boolean,
   ) => void;
   mode: "review" | "crosscheck";
+  readOnly?: boolean;
   autoNext: boolean;
   setAutoNext: (val: boolean) => void;
   hasPrev: boolean;
   hasNext: boolean;
   onNavigate: (direction: "prev" | "next") => void;
+  reviewedCount: number;
+  pendingCount: number;
 }
 
 export function RatingModal({
@@ -231,16 +239,18 @@ export function RatingModal({
   onClose,
   onSubmit,
   mode,
+  readOnly = false,
   autoNext,
   setAutoNext,
   hasPrev,
   hasNext,
   onNavigate,
+  reviewedCount,
+  pendingCount,
 }: RatingModalProps) {
   const [rating, setRating] = useState<Ratings>(() => {
     if (initial) return initial;
 
-    // Default to "No Issue" for a fresh rating
     const defaultRating = {
       lighting: Severity.NoIssue,
       sharpness: Severity.NoIssue,
@@ -275,7 +285,8 @@ export function RatingModal({
   const [systemRating, setSystemRating] = useState(row.systemRating || "");
   const [showMidciDialog, setShowMidciDialog] = useState(false);
   const [copiedSessionId, setCopiedSessionId] = useState(false);
-
+  const [commentCopied, setCommentCopied] = useState(false); // ← new
+  const [crosscheckCopied, setCrosscheckCopied] = useState(false); // ← new
   const commentRef = useRef<HTMLTextAreaElement>(null);
   const crosscheckCommentRef = useRef<HTMLTextAreaElement>(null);
 
@@ -287,7 +298,16 @@ export function RatingModal({
   const isLinkMismatch = !row.link.endsWith(row.sessionId);
   const hasAlerts = !!(row.duplicate || isLinkMismatch || row.personalGmail);
 
-  // Auto‑show comment box if there's a non‑"Ok" custom comment
+  // ---- Queue progress ----
+  const totalCount = reviewedCount + pendingCount;
+  const progressPct =
+    totalCount > 0 ? Math.min(100, (reviewedCount / totalCount) * 100) : 0;
+  const allDone = totalCount > 0 && pendingCount === 0;
+  const progressTitle = allDone
+    ? `All ${totalCount} sessions reviewed`
+    : `${reviewedCount} reviewed · ${pendingCount} pending · ${Math.round(progressPct)}%`;
+
+  // Auto-show comment box if there's a non-"Ok" custom comment
   useEffect(() => {
     if (isCrosscheck && crosscheckComment && !isApproved) {
       setShowCommentBox(true);
@@ -295,6 +315,7 @@ export function RatingModal({
   }, [isCrosscheck, crosscheckComment, isApproved]);
 
   const handleFaceVisibleChange = (checked: boolean) => {
+    if (readOnly) return;
     setFaceVisible(checked);
     if (!commentManuallyEdited && !isCrosscheck) {
       setRating((prev) => {
@@ -309,6 +330,7 @@ export function RatingModal({
   };
 
   const handleStrikethrough = () => {
+    if (readOnly) return;
     const textarea = isCrosscheck
       ? crosscheckCommentRef.current
       : commentRef.current;
@@ -337,10 +359,12 @@ export function RatingModal({
   };
 
   const handleSystemRatingChange = (value: SystemRating | undefined) => {
+    if (readOnly) return;
     setSystemRating(value === SystemRating.None ? "" : value || "");
   };
 
   const update = <K extends keyof Ratings>(key: K, value: Ratings[K]) => {
+    if (readOnly) return;
     if (key === "comment" || key === "crosscheckComment") {
       if (key === "comment") setCommentManuallyEdited(true);
       setRating((prev): Ratings => ({ ...prev, [key]: value }));
@@ -396,18 +420,16 @@ export function RatingModal({
     });
   };
 
-  // Set every quality field (except System rating) to its "no issue" state
   const handleSetAllNoIssue = () => {
+    if (readOnly) return;
     setRating((prev) => {
       const newRating: Ratings = { ...prev, slowLoading: false };
-
       SEVERITY_FIELDS.forEach((f) => {
         newRating[f.key] = Severity.NoIssue;
       });
       newRating.seated = Seated.StandingMoving;
       newRating.environment = Environment.CorrectTask;
       newRating.other = Severity.NoIssue;
-
       if (!commentManuallyEdited) {
         newRating.comment = generateComment(
           newRating,
@@ -415,13 +437,12 @@ export function RatingModal({
           isOrientationConfirmed,
         );
       }
-
       return newRating;
     });
   };
 
-  // Clear all rating fields
   const handleClearRating = () => {
+    if (readOnly) return;
     setRating((prev) => {
       const newRating: Ratings = { ...prev, slowLoading: false, comment: "" };
       SEVERITY_FIELDS.forEach((f) => {
@@ -438,7 +459,7 @@ export function RatingModal({
   const complete = isRatingComplete(rating);
 
   useEffect(() => {
-    if (isCrosscheck) return;
+    if (isCrosscheck || readOnly) return;
 
     const isCameraAngleIssue =
       rating.cameraAngle === Severity.Minor ||
@@ -466,10 +487,10 @@ export function RatingModal({
     rating.comment,
     isCrosscheck,
     isOrientationConfirmed,
+    readOnly,
   ]);
 
   const handleOrientationYes = () => {
-    // Generate new comment with camera/fov excluded and orientation note
     const newComment = generateComment(rating, faceVisible, true);
     setRating((prev) => ({
       ...prev,
@@ -534,20 +555,14 @@ export function RatingModal({
         majorKeys.push(label);
       }
     }
-    if (r.seated === Seated.Seated) {
-      majorKeys.push("Seated");
-    }
-    if (r.environment === Environment.WrongTask) {
-      majorKeys.push("Environment");
-    }
-    if (r.other === Severity.Major) {
-      majorKeys.push("Other");
-    }
+    if (r.seated === Seated.Seated) majorKeys.push("Seated");
+    if (r.environment === Environment.WrongTask) majorKeys.push("Environment");
+    if (r.other === Severity.Major) majorKeys.push("Other");
     return majorKeys.join("_");
   };
 
   const handleSubmitClick = (isDraft = false) => {
-    // Special case: midcitigarments and major issue (only trigger on final submit)
+    if (readOnly) return;
     if (
       !isDraft &&
       row.email === "accounts@midcitigarments.com" &&
@@ -579,11 +594,10 @@ export function RatingModal({
 
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
-        // If complete (or crosscheck), Enter submits. If incomplete, it saves draft.
+        if (readOnly) return;
         handleSubmitClickRef.current(!complete && !isCrosscheck);
       }
 
-      // Navigation Shortcuts
       if (e.altKey && e.key === "ArrowLeft") {
         e.preventDefault();
         if (hasPrev) onNavigate("prev");
@@ -603,10 +617,37 @@ export function RatingModal({
     onNavigate,
     complete,
     isCrosscheck,
+    readOnly,
   ]);
 
   const handleCopyOriginal = () => {
     navigator.clipboard.writeText(originalComment);
+  };
+
+  // ← new
+  const handleCopyComment = () => {
+    const text = rating.comment || "";
+    if (!text) return;
+    navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setCommentCopied(true);
+        window.setTimeout(() => setCommentCopied(false), 1500);
+      })
+      .catch(console.error);
+  };
+
+  // ← new
+  const handleCopyCrosscheckComment = () => {
+    const text = rating.crosscheckComment || "";
+    if (!text) return;
+    navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setCrosscheckCopied(true);
+        window.setTimeout(() => setCrosscheckCopied(false), 1500);
+      })
+      .catch(console.error);
   };
 
   const handleCopySessionId = () => {
@@ -624,11 +665,13 @@ export function RatingModal({
   };
 
   const handleApprove = () => {
+    if (readOnly) return;
     setRating((prev) => ({ ...prev, crosscheckComment: "Ok" }));
     setShowCommentBox(false);
   };
 
   const handleRevoke = () => {
+    if (readOnly) return;
     if (
       window.confirm(
         "Are you sure you want to revoke approval? This will clear the crosscheck comment.",
@@ -640,7 +683,7 @@ export function RatingModal({
   };
 
   const toggleCommentBox = () => {
-    if (isApproved) return;
+    if (readOnly || isApproved) return;
     setShowCommentBox((prev) => !prev);
     if (!showCommentBox) {
       setTimeout(() => {
@@ -667,7 +710,6 @@ export function RatingModal({
       >
         {/* ───────── Header ───────── */}
         <div className="px-6 py-4 border-b border-slate-100 flex flex-col gap-3">
-          {/* Title Row */}
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-2 flex-wrap min-w-0">
               <h2
@@ -691,6 +733,14 @@ export function RatingModal({
                   title="This sessionId appeared more than once in the QC input"
                 >
                   <Copy size={11} /> Duplicate
+                </span>
+              )}
+              {readOnly && (
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wider text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded shrink-0"
+                  title="This review is read-only because the session is not editable"
+                >
+                  <Lock size={10} /> Read-only
                 </span>
               )}
             </div>
@@ -718,7 +768,6 @@ export function RatingModal({
             </div>
           </div>
 
-          {/* Meta + System Rating Row */}
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
             <div className="min-w-0 flex flex-col gap-1">
               <p className="text-xs text-slate-500 break-all">{row.email}</p>
@@ -745,7 +794,11 @@ export function RatingModal({
               </div>
             </div>
 
-            <div className="flex flex-col gap-1.5 shrink-0">
+            <div
+              className={`flex flex-col gap-1.5 shrink-0 ${
+                readOnly ? "pointer-events-none opacity-60" : ""
+              }`}
+            >
               <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
                 System rating
               </span>
@@ -784,9 +837,7 @@ export function RatingModal({
             </div>
           )}
 
-          {/* ============================================================ */}
           {/* REVIEW MODE */}
-          {/* ============================================================ */}
           {!isCrosscheck && (
             <>
               <div className={hasAlerts ? sectionDivider : ""}>
@@ -795,27 +846,28 @@ export function RatingModal({
                     Video quality
                   </h3>
 
-                  {isRatingEmpty(rating) ? (
-                    <button
-                      type="button"
-                      onClick={handleSetAllNoIssue}
-                      title="Set all fields to No issue"
-                      className={`inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer ${FOCUS_RING}`}
-                    >
-                      <CheckCheck size={14} />
-                      Mark all no issue
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handleClearRating}
-                      title="Clear all rating fields"
-                      className={`inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-rose-700 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer ${FOCUS_RING}`}
-                    >
-                      <Trash2 size={14} />
-                      Clear rating
-                    </button>
-                  )}
+                  {!readOnly &&
+                    (isRatingEmpty(rating) ? (
+                      <button
+                        type="button"
+                        onClick={handleSetAllNoIssue}
+                        title="Set all fields to No issue"
+                        className={`inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer ${FOCUS_RING}`}
+                      >
+                        <CheckCheck size={14} />
+                        Mark all no issue
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleClearRating}
+                        title="Clear all rating fields"
+                        className={`inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-rose-700 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer ${FOCUS_RING}`}
+                      >
+                        <Trash2 size={14} />
+                        Clear rating
+                      </button>
+                    ))}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
                   {SEVERITY_FIELDS.map((f) => (
@@ -826,7 +878,7 @@ export function RatingModal({
                       value={rating[f.key] || undefined}
                       onChange={(v) => update(f.key, v || "")}
                       tone="severity"
-                      disabled={false}
+                      disabled={readOnly}
                       compact
                     />
                   ))}
@@ -844,7 +896,7 @@ export function RatingModal({
                     value={rating.seated || undefined}
                     onChange={(v) => update("seated", v || "")}
                     styleMap={SEATED_STYLE_MAP}
-                    disabled={false}
+                    disabled={readOnly}
                     compact
                   />
 
@@ -854,7 +906,7 @@ export function RatingModal({
                     value={rating.environment || undefined}
                     onChange={(v) => update("environment", v || "")}
                     styleMap={ENVIRONMENT_STYLE_MAP}
-                    disabled={false}
+                    disabled={readOnly}
                     compact
                   />
 
@@ -865,6 +917,7 @@ export function RatingModal({
                       value={rating.other || undefined}
                       onChange={(v) => update("other", v || "")}
                       tone="severity"
+                      disabled={readOnly}
                       compact
                     />
                   </div>
@@ -873,9 +926,26 @@ export function RatingModal({
 
               <div className={`${sectionDivider} space-y-3`}>
                 <div className="space-y-1.5">
-                  <label htmlFor="rating-comment" className={FIELD_LABEL}>
-                    Comments
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="rating-comment" className={FIELD_LABEL}>
+                      Comments
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleCopyComment}
+                      disabled={!rating.comment}
+                      title={commentCopied ? "Copied!" : "Copy comment"}
+                      aria-label={commentCopied ? "Copied" : "Copy comment"}
+                      className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-md transition-colors ${FOCUS_RING} disabled:opacity-40 disabled:cursor-not-allowed ${
+                        commentCopied
+                          ? "text-emerald-700 bg-emerald-50"
+                          : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
+                      }`}
+                    >
+                      {commentCopied ? <Check size={13} /> : <Copy size={13} />}
+                      {commentCopied ? "Copied" : "Copy"}
+                    </button>
+                  </div>
                   <textarea
                     id="rating-comment"
                     ref={commentRef}
@@ -885,26 +955,32 @@ export function RatingModal({
                     style={{ fontFamily: FONT_UI }}
                     className={`${TEXT_INPUT} resize-y min-h-[40px]`}
                     rows={2}
+                    readOnly={readOnly}
                   />
                 </div>
 
                 <div className="flex flex-wrap items-center justify-end gap-x-5 gap-y-2">
                   <label
                     htmlFor="slowLoading"
-                    className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none"
+                    className={`inline-flex items-center gap-2 text-sm text-slate-600 select-none ${
+                      readOnly ? "opacity-60" : "cursor-pointer"
+                    }`}
                   >
                     <input
                       type="checkbox"
                       id="slowLoading"
                       checked={rating.slowLoading || false}
                       onChange={(e) => update("slowLoading", e.target.checked)}
-                      className="w-4 h-4 cursor-pointer rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      disabled={readOnly}
+                      className="w-4 h-4 cursor-pointer rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed"
                     />
                     Slow loading
                   </label>
                   <label
                     htmlFor="faceVisible"
-                    className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none"
+                    className={`inline-flex items-center gap-2 text-sm text-slate-600 select-none ${
+                      readOnly ? "opacity-60" : "cursor-pointer"
+                    }`}
                   >
                     <input
                       type="checkbox"
@@ -913,7 +989,8 @@ export function RatingModal({
                       onChange={(e) =>
                         handleFaceVisibleChange(e.target.checked)
                       }
-                      className="w-4 h-4 cursor-pointer rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      disabled={readOnly}
+                      className="w-4 h-4 cursor-pointer rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed"
                     />
                     Faces visible
                   </label>
@@ -922,9 +999,7 @@ export function RatingModal({
             </>
           )}
 
-          {/* ============================================================ */}
           {/* CROSSCHECK MODE */}
-          {/* ============================================================ */}
           {isCrosscheck && (
             <>
               <div className={hasAlerts ? sectionDivider : ""}>
@@ -940,6 +1015,7 @@ export function RatingModal({
                       value={rating[f.key] || undefined}
                       onChange={(v) => update(f.key, v || "")}
                       styleMap={SEVERITY_DROPDOWN_STYLES}
+                      disabled={readOnly}
                     />
                   ))}
                 </div>
@@ -956,6 +1032,7 @@ export function RatingModal({
                     value={rating.seated || undefined}
                     onChange={(v) => update("seated", v || "")}
                     styleMap={SEATED_DROPDOWN_STYLES}
+                    disabled={readOnly}
                   />
 
                   <DropdownField<Environment>
@@ -964,6 +1041,7 @@ export function RatingModal({
                     value={rating.environment || undefined}
                     onChange={(v) => update("environment", v || "")}
                     styleMap={ENVIRONMENT_DROPDOWN_STYLES}
+                    disabled={readOnly}
                   />
 
                   <DropdownField<Other>
@@ -972,11 +1050,11 @@ export function RatingModal({
                     value={rating.other || undefined}
                     onChange={(v) => update("other", v || "")}
                     styleMap={OTHER_DROPDOWN_STYLES}
+                    disabled={readOnly}
                   />
                 </div>
               </div>
 
-              {/* Original QC comment block */}
               {originalComment && (
                 <div className="bg-slate-50 rounded-xl border border-slate-200 p-3">
                   <div className="flex items-center justify-between flex-wrap gap-2">
@@ -1015,17 +1093,20 @@ export function RatingModal({
                         onClick={isApproved ? handleRevoke : handleApprove}
                         onMouseEnter={() => setIsHoveringApproval(true)}
                         onMouseLeave={() => setIsHoveringApproval(false)}
+                        disabled={readOnly}
                         title={
-                          isApproved
-                            ? isHoveringApproval
-                              ? "Undo confirm"
-                              : "Confirmed"
-                            : "Confirm match"
+                          readOnly
+                            ? "Read-only"
+                            : isApproved
+                              ? isHoveringApproval
+                                ? "Undo confirm"
+                                : "Confirmed"
+                              : "Confirm match"
                         }
                         aria-label={
                           isApproved ? "Undo confirm" : "Confirm match"
                         }
-                        className={`cursor-pointer rounded-full ${FOCUS_RING}`}
+                        className={`cursor-pointer rounded-full ${FOCUS_RING} disabled:cursor-not-allowed disabled:opacity-50`}
                       >
                         <div
                           className={`relative w-6 h-6 rounded-full flex items-center justify-center overflow-hidden transition-colors ${
@@ -1107,29 +1188,31 @@ export function RatingModal({
                         {originalComment}
                       </p>
 
-                      <div className="border-t border-slate-200 mt-3 pt-3 flex items-center gap-3 flex-wrap">
-                        {!isApproved && (
-                          <button
-                            type="button"
-                            onClick={toggleCommentBox}
-                            className={`inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 rounded-md transition-colors cursor-pointer ${FOCUS_RING}`}
-                          >
-                            <Edit3 size={13} />
-                            {crosscheckComment ? "Edit note" : "Add note"}
-                          </button>
-                        )}
-                        {isApproved && (
-                          <button
-                            type="button"
-                            onClick={handleRevoke}
-                            className={`text-xs font-medium text-slate-500 hover:text-slate-800 rounded-md transition-colors cursor-pointer ${FOCUS_RING}`}
-                          >
-                            Revoke
-                          </button>
-                        )}
-                      </div>
+                      {!readOnly && (
+                        <div className="border-t border-slate-200 mt-3 pt-3 flex items-center gap-3 flex-wrap">
+                          {!isApproved && (
+                            <button
+                              type="button"
+                              onClick={toggleCommentBox}
+                              className={`inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 rounded-md transition-colors cursor-pointer ${FOCUS_RING}`}
+                            >
+                              <Edit3 size={13} />
+                              {crosscheckComment ? "Edit note" : "Add note"}
+                            </button>
+                          )}
+                          {isApproved && (
+                            <button
+                              type="button"
+                              onClick={handleRevoke}
+                              className={`text-xs font-medium text-slate-500 hover:text-slate-800 rounded-md transition-colors cursor-pointer ${FOCUS_RING}`}
+                            >
+                              Revoke
+                            </button>
+                          )}
+                        </div>
+                      )}
 
-                      {showCommentBox && !isApproved && (
+                      {showCommentBox && !isApproved && !readOnly && (
                         <div className="mt-3 space-y-1.5">
                           <div className="flex items-center justify-between">
                             <label
@@ -1182,86 +1265,141 @@ export function RatingModal({
         </div>
 
         {/* ───────── Footer ───────── */}
-        <div className="px-6 py-3.5 border-t border-slate-100 flex items-center justify-between gap-3 flex-wrap bg-white rounded-b-2xl">
-          {/* Navigation + auto-next (both are about moving between sessions) */}
+        <div className="relative px-6 py-3.5 flex items-center justify-between gap-3 flex-wrap bg-white rounded-b-2xl">
+          <div
+            role="progressbar"
+            aria-label="Review progress"
+            aria-valuemin={0}
+            aria-valuemax={totalCount}
+            aria-valuenow={reviewedCount}
+            aria-valuetext={progressTitle}
+            title={progressTitle}
+            className="absolute inset-x-0 top-0 h-[2px] bg-slate-100 overflow-hidden"
+          >
+            <motion.div
+              className={`h-full ${allDone ? "bg-emerald-500" : "bg-blue-600"}`}
+              initial={{ width: 0 }}
+              animate={{ width: `${progressPct}%` }}
+              transition={{ duration: 0.5, ease: "easeOut" }}
+              style={{ minWidth: reviewedCount > 0 ? 6 : 0 }}
+            />
+          </div>
+
           <div className="flex items-center gap-3 flex-wrap">
             <div className="inline-flex items-center gap-0.5 p-1 rounded-lg bg-slate-200/60">
               <button
                 onClick={() => onNavigate("prev")}
                 disabled={!hasPrev}
                 title="Previous session (Alt+Left)"
-                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-sm font-medium text-slate-600 hover:bg-white hover:text-slate-900 hover:shadow-sm disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:shadow-none transition-colors ${FOCUS_RING}`}
+                aria-label="Previous session"
+                className={NAV_ARROW}
               >
-                <ChevronLeft size={15} />
-                <span className="hidden sm:inline">Prev</span>
+                <ChevronLeft size={16} />
               </button>
+
+              <span
+                className={`inline-flex items-center gap-1 px-2 text-xs font-medium tabular-nums select-none whitespace-nowrap ${
+                  allDone ? "text-emerald-700" : "text-slate-500"
+                }`}
+                style={{ fontFamily: FONT_DATA }}
+                title={progressTitle}
+                aria-label={progressTitle}
+              >
+                {allDone ? (
+                  <>
+                    <CheckCheck size={13} />
+                    <span className="hidden sm:inline">
+                      All {totalCount} done
+                    </span>
+                    <span className="sm:hidden">{totalCount}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="sm:hidden">
+                      {reviewedCount}/{totalCount}
+                    </span>
+                    <span className="hidden sm:inline">
+                      {reviewedCount} of {totalCount} done
+                    </span>
+                  </>
+                )}
+              </span>
+
               <button
                 onClick={() => onNavigate("next")}
                 disabled={!hasNext}
                 title="Next session (Alt+Right)"
-                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-sm font-medium text-slate-600 hover:bg-white hover:text-slate-900 hover:shadow-sm disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:shadow-none transition-colors ${FOCUS_RING}`}
+                aria-label="Next session"
+                className={NAV_ARROW}
               >
-                <span className="hidden sm:inline">Next</span>
-                <ChevronRight size={15} />
+                <ChevronRight size={16} />
               </button>
             </div>
 
-            <button
-              type="button"
-              role="switch"
-              aria-checked={autoNext}
-              onClick={() => setAutoNext(!autoNext)}
-              title="After you submit, open the next unrated session automatically"
-              className={`inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900 rounded-md ${FOCUS_RING}`}
-            >
-              <span
-                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-                  autoNext ? "bg-blue-600" : "bg-slate-300"
-                }`}
+            {!readOnly && (
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoNext}
+                onClick={() => setAutoNext(!autoNext)}
+                title="After you submit, open the next unrated session automatically"
+                className={`inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900 rounded-md ${FOCUS_RING}`}
               >
                 <span
-                  className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-                    autoNext ? "translate-x-[18px]" : "translate-x-0.5"
+                  className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                    autoNext ? "bg-blue-600" : "bg-slate-300"
                   }`}
-                />
-              </span>
-              Auto-next
-            </button>
-          </div>
-
-          {/* Actions */}
-          <div className="flex items-center gap-2">
-            {!isCrosscheck && (
-              <button
-                onClick={() => handleSubmitClick(true)}
-                className={BTN_GHOST}
-                title="Save progress without submitting"
-              >
-                Save draft
+                >
+                  <span
+                    className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                      autoNext ? "translate-x-[18px]" : "translate-x-0.5"
+                    }`}
+                  />
+                </span>
+                Auto-next
               </button>
             )}
-            <button
-              onClick={() => handleSubmitClick(false)}
-              disabled={!isCrosscheck && !complete}
-              title={
-                !isCrosscheck && !complete
-                  ? "Fill in every field to submit"
-                  : "Ctrl/⌘ + Enter"
-              }
-              className={
-                isCrosscheck || complete
-                  ? BTN_PRIMARY
-                  : `px-3.5 py-2 rounded-lg text-sm font-medium bg-slate-100 text-slate-400 cursor-not-allowed transition-colors`
-              }
-            >
-              {isCrosscheck ? "Save crosscheck" : "Submit review"}
-            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {readOnly ? (
+              <button onClick={onClose} className={BTN_PRIMARY}>
+                Close
+              </button>
+            ) : (
+              <>
+                {!isCrosscheck && (
+                  <button
+                    onClick={() => handleSubmitClick(true)}
+                    className={BTN_GHOST}
+                    title="Save progress without submitting"
+                  >
+                    Save draft
+                  </button>
+                )}
+                <button
+                  onClick={() => handleSubmitClick(false)}
+                  disabled={!isCrosscheck && !complete}
+                  title={
+                    !isCrosscheck && !complete
+                      ? "Fill in every field to submit"
+                      : "Ctrl/⌘ + Enter"
+                  }
+                  className={
+                    isCrosscheck || complete
+                      ? BTN_PRIMARY
+                      : `px-3.5 py-2 rounded-lg text-sm font-medium bg-slate-100 text-slate-400 cursor-not-allowed transition-colors`
+                  }
+                >
+                  {isCrosscheck ? "Save crosscheck" : "Submit review"}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Orientation confirmation dialog (review only) */}
-      {showOrientationDialog && (
+      {showOrientationDialog && !readOnly && (
         <ConfirmDialog
           labelId="orientation-title"
           title="Camera orientation"
@@ -1281,8 +1419,7 @@ export function RatingModal({
         </ConfirmDialog>
       )}
 
-      {/* Midcitigarments major issue dialog */}
-      {showMidciDialog && (
+      {showMidciDialog && !readOnly && (
         <ConfirmDialog
           labelId="midci-title"
           title="Major issue detected"

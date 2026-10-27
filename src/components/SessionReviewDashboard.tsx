@@ -13,6 +13,10 @@ import {
   LocateFixed,
   XCircle,
   Send,
+  Loader2,
+  Terminal,
+  Eye,
+  RotateCcw,
 } from "lucide-react";
 import { SessionRow, Ratings } from "../utilities/types";
 import { FONT_DISPLAY, FONT_UI, FONT_DATA } from "../utilities/constants";
@@ -33,8 +37,6 @@ import { TaskSearchInput } from "./TaskSearchInput";
 import { SessionLink } from "./SessionLink";
 
 const AUTO_NEXT_STORAGE_KEY = "sessionQa.autoNext";
-
-// Height of the app's top nav. The filter toolbar sticks just beneath it.
 const APP_NAV_OFFSET = 56;
 
 export function SessionReviewDashboard() {
@@ -44,11 +46,13 @@ export function SessionReviewDashboard() {
     rows,
     ratings,
     submitRating,
+    toggleResolved,
     exportCSV,
     filters,
     setFilters,
     clearFilters,
     hasActiveFilters,
+    refetch,
   } = useSessions({
     endpoint: "/api/sessions",
     ratingsEndpoint: "/api/ratings",
@@ -126,7 +130,6 @@ export function SessionReviewDashboard() {
     if (!activeRow) return;
 
     const currentSessionId = activeRow.sessionId;
-    // Only advance if NOT a draft
     const nextRow =
       autoNext && !isDraft ? findNextUnratedRow(currentSessionId) : undefined;
 
@@ -139,7 +142,6 @@ export function SessionReviewDashboard() {
 
     const result = await submitRating(
       currentSessionId,
-      // Add isDraft to the local state via ratings payload
       { ...submittedRatings, isDraft } as Ratings,
       systemRating,
       faceVisible,
@@ -166,6 +168,17 @@ export function SessionReviewDashboard() {
       );
       setActiveRow(null);
       setReviewingRowId(null);
+    }
+  };
+
+  const handleToggleResolved = async (row: SessionRow, resolved: boolean) => {
+    const result = await toggleResolved(row.sessionId, resolved);
+    if (result.success) {
+      showToast(
+        resolved ? `Marked ${row.email} as resolved` : `Unmarked ${row.email}`,
+      );
+    } else {
+      showToast("Failed to update resolution");
     }
   };
 
@@ -227,10 +240,11 @@ export function SessionReviewDashboard() {
 
   const hoveredRating = hoveredRowId ? ratings[hoveredRowId] : undefined;
 
-  // ----- Stats & progress (5 statuses) -----
+  // ----- Stats & progress (6 statuses) -----
   const stats = useMemo(() => {
     let submitted = 0;
     let failed = 0;
+    let resolved = 0;
     let reviewed = 0;
     let inProgress = 0;
     let pending = 0;
@@ -240,9 +254,10 @@ export function SessionReviewDashboard() {
       const isDraft = (rating as any)?.isDraft === true;
 
       if (row.submitted === true) submitted++;
-      else if (row.submitted === false) failed++;
-      else if (isDraft)
-        inProgress++; // Drafts are in progress
+      else if (row.submitted === false) {
+        if (row.resolved) resolved++;
+        else failed++;
+      } else if (isDraft) inProgress++;
       else if (rating && isRatingComplete(rating)) reviewed++;
       else if (rating && !isRatingEmpty(rating)) inProgress++;
       else pending++;
@@ -252,6 +267,7 @@ export function SessionReviewDashboard() {
       total: baseFilteredRows.length,
       submitted,
       failed,
+      resolved,
       reviewed,
       inProgress,
       pending,
@@ -262,13 +278,18 @@ export function SessionReviewDashboard() {
     total: totalCount,
     submitted: submittedCount,
     failed: failedCount,
+    resolved: resolvedCount,
     reviewed: reviewedCount,
     inProgress: inProgressCount,
     pending: pendingCount,
   } = stats;
 
   const handledCount =
-    submittedCount + failedCount + reviewedCount + inProgressCount;
+    submittedCount +
+    resolvedCount +
+    failedCount +
+    reviewedCount +
+    inProgressCount;
   const pct = (n: number) => (totalCount ? (n / totalCount) * 100 : 0);
   const handledPct = Math.round(pct(handledCount));
 
@@ -279,13 +300,19 @@ export function SessionReviewDashboard() {
       count: submittedCount,
       bar: "bg-emerald-400",
     },
-    { key: "failed", label: "Failed", count: failedCount, bar: "bg-rose-500" },
     {
       key: "reviewed",
       label: "Reviewed",
       count: reviewedCount,
       bar: "bg-emerald-800",
     },
+    {
+      key: "resolved",
+      label: "Resolved",
+      count: resolvedCount,
+      bar: "bg-sky-500",
+    },
+    { key: "failed", label: "Failed", count: failedCount, bar: "bg-rose-500" },
     {
       key: "inProgress",
       label: "In progress",
@@ -306,6 +333,7 @@ export function SessionReviewDashboard() {
     { key: "In progress", label: "In progress", count: inProgressCount },
     { key: "Reviewed", label: "Reviewed", count: reviewedCount },
     { key: "Submitted", label: "Submitted", count: submittedCount },
+    { key: "Resolved", label: "Resolved", count: resolvedCount },
     { key: "Failed", label: "Failed", count: failedCount },
   ];
 
@@ -314,7 +342,6 @@ export function SessionReviewDashboard() {
       <div className="max-w-[1600px] mx-auto px-4 sm:px-6 pt-8 pb-24">
         {/* ───────── PAGE HEADER (scrolls away) ───────── */}
         <header className="flex flex-col gap-6 mb-6">
-          {/* Title + actions */}
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
             <div>
               <h1
@@ -353,6 +380,8 @@ export function SessionReviewDashboard() {
                 Auto-next
               </button>
 
+              <RunAutoRaterButton onComplete={refetch} onToast={showToast} />
+
               <button
                 onClick={handleDownload}
                 className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-white text-slate-700 text-sm font-medium border border-slate-200 hover:bg-slate-50 hover:border-slate-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40"
@@ -363,7 +392,7 @@ export function SessionReviewDashboard() {
             </div>
           </div>
 
-          {/* Progress — one bar, five-segment legend */}
+          {/* Progress — one bar, six-segment legend */}
           <div>
             <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 mb-2.5">
               <p className="text-sm text-slate-600">
@@ -422,14 +451,12 @@ export function SessionReviewDashboard() {
           <DailyTracker days={14} />
         </header>
 
-        {/* ───────── STICKY TOOLBAR (the only sticky piece) ───────── */}
+        {/* ───────── STICKY TOOLBAR ───────── */}
         <div
           className="sticky z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 mb-4 bg-[#F7F8FA]/90 backdrop-blur-md border-b border-slate-200/70"
           style={{ top: APP_NAV_OFFSET }}
         >
-          {/* RESPONSIVE TOOLBAR CONTAINER */}
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-            {/* Status segmented control — 5 states + All */}
             <div
               role="group"
               aria-label="Filter by review status"
@@ -464,7 +491,6 @@ export function SessionReviewDashboard() {
               })}
             </div>
 
-            {/* Search + advanced filters */}
             <div className="flex items-center gap-2 w-full lg:w-auto">
               <div className="flex-1 lg:w-64 lg:flex-none">
                 <TaskSearchInput filters={filters} setFilters={setFilters} />
@@ -499,6 +525,7 @@ export function SessionReviewDashboard() {
                 const rating = ratings[row.sessionId];
                 const isSubmitted = row.submitted === true;
                 const isFailed = row.submitted === false;
+                const isResolved = isFailed && row.resolved === true;
                 const isDraft = (rating as any)?.isDraft === true;
                 const isRated =
                   rating !== undefined && isRatingComplete(rating) && !isDraft;
@@ -544,6 +571,14 @@ export function SessionReviewDashboard() {
                             <XCircle
                               size={14}
                               className="text-rose-500 shrink-0"
+                            />
+                          </span>
+                        )}
+                        {isResolved && (
+                          <span title="Marked as manually resolved">
+                            <CheckCircle2
+                              size={14}
+                              className="text-sky-500 shrink-0"
                             />
                           </span>
                         )}
@@ -600,6 +635,7 @@ export function SessionReviewDashboard() {
                       <StatusBadge
                         isSubmitted={isSubmitted}
                         isFailed={isFailed}
+                        isResolved={isResolved}
                         isRated={isRated}
                         hasRating={hasRating}
                         isDraft={isDraft}
@@ -618,32 +654,68 @@ export function SessionReviewDashboard() {
                             );
                           }}
                         />
-                        <button
-                          onClick={() => {
-                            setReviewingRowId(row.sessionId);
-                            setActiveRow(row);
-                          }}
-                          className={`inline-flex items-center justify-center gap-1.5 min-w-[120px] px-3 py-2 rounded-lg text-xs font-semibold transition-all border cursor-pointer whitespace-nowrap ${
-                            isButtonDone
-                              ? "bg-slate-100 text-blue-500 hover:bg-blue-50 hover:text-blue-700 border-slate-300 hover:border-blue-300"
+
+                        {isFailed ? (
+                          <>
+                            <button
+                              onClick={() => {
+                                setReviewingRowId(row.sessionId);
+                                setActiveRow(row);
+                              }}
+                              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 hover:text-slate-900 border border-slate-300 transition-all cursor-pointer whitespace-nowrap"
+                            >
+                              <Eye size={13} />
+                              View review
+                            </button>
+
+                            {isResolved ? (
+                              <button
+                                onClick={() => handleToggleResolved(row, false)}
+                                title="Unmark as resolved"
+                                className="inline-flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-800 border border-slate-200 transition-all cursor-pointer whitespace-nowrap"
+                              >
+                                <RotateCcw size={13} />
+                                Unresolve
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleToggleResolved(row, true)}
+                                title="Mark this failed submission as manually resolved"
+                                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-sky-600 text-white hover:bg-sky-700 border-transparent shadow-sm shadow-sky-600/20 transition-all cursor-pointer whitespace-nowrap"
+                              >
+                                <CheckCircle2 size={13} />
+                                Mark resolved
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setReviewingRowId(row.sessionId);
+                              setActiveRow(row);
+                            }}
+                            className={`inline-flex items-center justify-center gap-1.5 min-w-[120px] px-3 py-2 rounded-lg text-xs font-semibold transition-all border cursor-pointer whitespace-nowrap ${
+                              isButtonDone
+                                ? "bg-slate-100 text-blue-500 hover:bg-blue-50 hover:text-blue-700 border-slate-300 hover:border-blue-300"
+                                : hasRating
+                                  ? "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-blue-600 border-slate-300"
+                                  : "bg-blue-600 text-white hover:bg-blue-700 border-transparent shadow-sm shadow-blue-600/20"
+                            }`}
+                          >
+                            {isButtonDone ? (
+                              <SquarePen size={13} />
+                            ) : hasRating ? (
+                              <Play size={13} />
+                            ) : (
+                              <Star size={13} />
+                            )}
+                            {isButtonDone
+                              ? "Edit review"
                               : hasRating
-                                ? "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-blue-600 border-slate-300"
-                                : "bg-blue-600 text-white hover:bg-blue-700 border-transparent shadow-sm shadow-blue-600/20"
-                          }`}
-                        >
-                          {isButtonDone ? (
-                            <SquarePen size={13} />
-                          ) : hasRating ? (
-                            <Play size={13} />
-                          ) : (
-                            <Star size={13} />
-                          )}
-                          {isButtonDone
-                            ? "Edit review"
-                            : hasRating
-                              ? "Update draft"
-                              : "Rate video"}
-                        </button>
+                                ? "Update draft"
+                                : "Rate video"}
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -669,6 +741,7 @@ export function SessionReviewDashboard() {
             const rating = ratings[row.sessionId];
             const isSubmitted = row.submitted === true;
             const isFailed = row.submitted === false;
+            const isResolved = isFailed && row.resolved === true;
             const isDraft = (rating as any)?.isDraft === true;
             const isRated =
               rating !== undefined && isRatingComplete(rating) && !isDraft;
@@ -704,6 +777,12 @@ export function SessionReviewDashboard() {
                       {isFailed && (
                         <XCircle size={13} className="text-rose-500 shrink-0" />
                       )}
+                      {isResolved && (
+                        <CheckCircle2
+                          size={13}
+                          className="text-sky-500 shrink-0"
+                        />
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
@@ -736,6 +815,7 @@ export function SessionReviewDashboard() {
                     <StatusBadge
                       isSubmitted={isSubmitted}
                       isFailed={isFailed}
+                      isResolved={isResolved}
                       isRated={isRated}
                       hasRating={hasRating}
                       isDraft={isDraft}
@@ -794,33 +874,65 @@ export function SessionReviewDashboard() {
                     }}
                     fullWidth={true}
                   />
-                  <button
-                    onClick={() => {
-                      setReviewingRowId(row.sessionId);
-                      setActiveRow(row);
-                    }}
-                    className={`flex-1 inline-flex items-center justify-center gap-1.5 min-w-[120px] px-3 py-2 rounded-lg text-xs font-semibold border cursor-pointer ${
-                      isButtonDone
-                        ? "bg-slate-100 text-blue-600 hover:bg-blue-50 hover:text-blue-700 border-slate-300 hover:border-blue-300"
+                  {isFailed ? (
+                    <button
+                      onClick={() => {
+                        setReviewingRowId(row.sessionId);
+                        setActiveRow(row);
+                      }}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 hover:text-slate-900 border border-slate-300"
+                    >
+                      <Eye size={13} /> View review
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setReviewingRowId(row.sessionId);
+                        setActiveRow(row);
+                      }}
+                      className={`flex-1 inline-flex items-center justify-center gap-1.5 min-w-[120px] px-3 py-2 rounded-lg text-xs font-semibold border cursor-pointer ${
+                        isButtonDone
+                          ? "bg-slate-100 text-blue-600 hover:bg-blue-50 hover:text-blue-700 border-slate-300 hover:border-blue-300"
+                          : hasRating
+                            ? "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-blue-600 border-slate-300"
+                            : "bg-blue-600 text-white hover:bg-blue-700 border-transparent shadow-sm shadow-blue-600/20"
+                      }`}
+                    >
+                      {isButtonDone ? (
+                        <SquarePen size={13} />
+                      ) : hasRating ? (
+                        <Play size={13} />
+                      ) : (
+                        <Star size={13} />
+                      )}{" "}
+                      {isButtonDone
+                        ? "Edit review"
                         : hasRating
-                          ? "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-blue-600 border-slate-300"
-                          : "bg-blue-600 text-white hover:bg-blue-700 border-transparent shadow-sm shadow-blue-600/20"
+                          ? "Update draft"
+                          : "Rate video"}
+                    </button>
+                  )}
+                </div>
+                {isFailed && (
+                  <button
+                    onClick={() => handleToggleResolved(row, !isResolved)}
+                    className={`w-full mt-2 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${
+                      isResolved
+                        ? "bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-800 border-slate-200"
+                        : "bg-sky-600 text-white hover:bg-sky-700 border-transparent shadow-sm shadow-sky-600/20"
                     }`}
                   >
-                    {isButtonDone ? (
-                      <SquarePen size={13} />
-                    ) : hasRating ? (
-                      <Play size={13} />
+                    {isResolved ? (
+                      <>
+                        <RotateCcw size={13} /> Unmark resolved
+                      </>
                     ) : (
-                      <Star size={13} />
-                    )}{" "}
-                    {isButtonDone
-                      ? "Edit review"
-                      : hasRating
-                        ? "Update draft"
-                        : "Rate video"}
+                      <>
+                        <CheckCircle2 size={13} /> Mark as resolved
+                      </>
+                    )}
                   </button>
-                </div>
+                )}
               </div>
             );
           })}
@@ -832,7 +944,7 @@ export function SessionReviewDashboard() {
         </div>
       </div>
 
-      {/* Floating "Jump to unrated" — only when the next unrated row is off-screen */}
+      {/* Floating "Jump to unrated" */}
       {firstUnratedRow && !isUnratedVisible && !activeRow && (
         <button
           onClick={handleScrollToUnrated}
@@ -863,7 +975,7 @@ export function SessionReviewDashboard() {
         </div>
       )}
 
-      {/* Modal */}
+      {/* Modal — read-only for failed sessions */}
       {activeRow && (
         <RatingModal
           key={activeRow.sessionId}
@@ -875,11 +987,14 @@ export function SessionReviewDashboard() {
           }}
           onSubmit={handleSubmitRating}
           mode="review"
+          readOnly={activeRow.submitted === false}
           autoNext={autoNext}
           setAutoNext={setAutoNext}
           hasPrev={hasPrev}
           hasNext={hasNext}
           onNavigate={handleNavigate}
+          reviewedCount={reviewedCount}
+          pendingCount={pendingCount}
         />
       )}
 
@@ -898,12 +1013,13 @@ export function SessionReviewDashboard() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Status badge — single source of truth for the 5 review states      */
+/* Status badge — 6 review states                                     */
 /* ------------------------------------------------------------------ */
 
 function StatusBadge({
   isSubmitted,
   isFailed,
+  isResolved = false,
   isRated,
   hasRating,
   isDraft = false,
@@ -911,6 +1027,7 @@ function StatusBadge({
 }: {
   isSubmitted: boolean;
   isFailed: boolean;
+  isResolved?: boolean;
   isRated: boolean;
   hasRating: boolean;
   isDraft?: boolean;
@@ -926,6 +1043,13 @@ function StatusBadge({
         className={`${base} text-emerald-600 bg-emerald-50 border border-emerald-200`}
       >
         <Send size={size} /> Submitted
+      </span>
+    );
+  }
+  if (isFailed && isResolved) {
+    return (
+      <span className={`${base} text-sky-700 bg-sky-50 border border-sky-200`}>
+        <CheckCircle2 size={size} /> Resolved
       </span>
     );
   }
@@ -975,6 +1099,225 @@ function StatusBadge({
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Auto-rater trigger + log modal (unchanged)                         */
+/* ------------------------------------------------------------------ */
+
+type RateStatus = "idle" | "running" | "success" | "failed";
+
+function RunAutoRaterButton({
+  onComplete,
+  onToast,
+}: {
+  onComplete?: () => void | Promise<void>;
+  onToast?: (msg: string) => void;
+}) {
+  const [status, setStatus] = useState<RateStatus>("idle");
+  const [open, setOpen] = useState(false);
+  const [logs, setLogs] = useState("");
+  const [starting, setStarting] = useState(false);
+  const [limit, setLimit] = useState<string>("");
+  const pollRef = useRef<number | null>(null);
+
+  const poll = useCallback(async () => {
+    try {
+      const res = await fetch("http://localhost:5000/api/rate/status");
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const data: {
+        status: RateStatus;
+        running: boolean;
+        logs: string;
+      } = await res.json();
+
+      setStatus(data.status);
+      setLogs(data.logs || "");
+
+      if (!data.running) {
+        if (pollRef.current) window.clearInterval(pollRef.current);
+        pollRef.current = null;
+
+        if (data.status === "success") {
+          onToast?.("Auto-rater finished successfully");
+        } else if (data.status === "failed") {
+          onToast?.("Auto-rater finished with errors");
+        }
+        await onComplete?.();
+      }
+    } catch (err) {
+      if (pollRef.current) window.clearInterval(pollRef.current);
+      pollRef.current = null;
+      setStatus("failed");
+      setLogs(
+        `${logs}\n[client error] ${
+          err instanceof Error ? err.message : String(err)
+        }\n`,
+      );
+      onToast?.("Lost connection to auto-rater status endpoint");
+    }
+  }, [onComplete, onToast, logs]);
+
+  const startPolling = useCallback(() => {
+    if (pollRef.current) window.clearInterval(pollRef.current);
+    pollRef.current = window.setInterval(poll, 1500);
+    void poll();
+  }, [poll]);
+
+  const start = async () => {
+    setStarting(true);
+    setOpen(true);
+    try {
+      const parsedLimit = parseInt(limit, 10);
+      const res = await fetch("http://localhost:5000/api/rate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          limit:
+            isNaN(parsedLimit) || parsedLimit <= 0 ? undefined : parsedLimit,
+        }),
+      });
+
+      if (res.status === 409) {
+        // Already running
+      } else if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        onToast?.(body?.error ?? "Failed to start auto-rater");
+        setStatus("failed");
+        return;
+      }
+      startPolling();
+    } catch (err) {
+      onToast?.(
+        err instanceof Error ? err.message : "Failed to start auto-rater",
+      );
+      setStatus("failed");
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("http://localhost:5000/api/rate/status");
+        const data = await res.json();
+        if (cancelled) return;
+        setStatus(data.status);
+        setLogs(data.logs || "");
+        if (data.running) startPolling();
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (pollRef.current) window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const running = status === "running" || starting;
+  const disabled = running;
+
+  return (
+    <>
+      <div className="flex items-stretch rounded-lg border border-slate-300 bg-white shadow-sm overflow-hidden focus-within:ring-2 focus-within:ring-blue-600/40 focus-within:border-blue-600 transition-all">
+        <div className="flex items-center bg-slate-50 border-r border-slate-200 pl-3 pr-1">
+          <input
+            type="number"
+            min={1}
+            placeholder="Limit"
+            title="Max submissions for this run (leave blank for unlimited)"
+            value={limit}
+            onChange={(e) => setLimit(e.target.value)}
+            disabled={disabled}
+            className="w-[60px] bg-transparent text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none disabled:opacity-50"
+          />
+        </div>
+
+        <button
+          onClick={start}
+          disabled={disabled}
+          title="Run the auto-rater script"
+          className={`cursor-pointer inline-flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors focus:outline-none ${
+            disabled
+              ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+              : "bg-slate-900 text-slate-100 hover:bg-slate-800"
+          }`}
+        >
+          {running ? (
+            <Loader2 size={15} className="animate-spin text-amber-400" />
+          ) : (
+            <Terminal size={15} className="text-emerald-400" />
+          )}
+          {running ? "Running…" : "Run"}
+        </button>
+      </div>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={() => status !== "running" && setOpen(false)}
+        >
+          <div
+            className="bg-slate-900 text-slate-100 rounded-xl w-full max-w-3xl max-h-[80vh] flex flex-col shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
+              <div className="text-sm font-medium flex items-center gap-2">
+                <Terminal size={16} className="text-slate-400" />
+                Auto-rater —
+                <span
+                  className={
+                    status === "success"
+                      ? "text-emerald-400"
+                      : status === "failed"
+                        ? "text-rose-400"
+                        : status === "running"
+                          ? "text-amber-400"
+                          : "text-slate-300"
+                  }
+                >
+                  {status}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {status === "running" && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        await fetch("http://localhost:5000/api/rate/cancel", {
+                          method: "POST",
+                        });
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                    className="cursor-pointer text-xs px-2 py-1 rounded border border-rose-500/60 text-rose-300 hover:bg-rose-500/10"
+                  >
+                    Cancel
+                  </button>
+                )}
+                <button
+                  onClick={() => setOpen(false)}
+                  disabled={status === "running"}
+                  className="cursor-pointer text-xs px-2 py-1 rounded border border-slate-600 disabled:opacity-40 hover:bg-slate-800"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <pre className="flex-1 overflow-auto p-4 text-[12px] leading-relaxed font-mono whitespace-pre-wrap">
+              {logs || "Waiting for output…"}
+            </pre>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function findVisibleRowElement(sessionId: string): HTMLElement | null {
   const nodes = Array.from(
     document.querySelectorAll<HTMLElement>("[data-session-id]"),
@@ -983,7 +1326,6 @@ function findVisibleRowElement(sessionId: string): HTMLElement | null {
   return nodes.find((el) => el.offsetParent !== null) ?? nodes[0] ?? null;
 }
 
-/** Scrolls a row to the centre of the viewport, respecting reduced motion. */
 function scrollRowIntoView(sessionId: string, flash = false) {
   const el = findVisibleRowElement(sessionId);
   if (!el) return;

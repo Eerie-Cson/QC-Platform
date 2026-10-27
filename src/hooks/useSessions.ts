@@ -52,7 +52,6 @@ export function useSessions({
   const [ratings, setRatings] = useState<Record<string, Ratings>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
   const [filters, setFilters] = useState<FilterState>(initialFilters);
 
   const fetchSessions = useCallback(async () => {
@@ -89,7 +88,6 @@ export function useSessions({
       const match = (filterVal: string, actualVal: string | undefined) =>
         filterVal === "All" || actualVal === filterVal;
 
-      // System rating logic
       let systemMatch = true;
       if (filters.systemRating === "All") {
         systemMatch = true;
@@ -99,7 +97,6 @@ export function useSessions({
         systemMatch = row.systemRating === filters.systemRating;
       }
 
-      // Search by task name OR email – case-insensitive
       const taskMatch =
         searchTerm === "" ||
         row.task.toLowerCase().includes(searchTerm) ||
@@ -130,10 +127,13 @@ export function useSessions({
       const isSubmitted = row.submitted === true;
       const isFailed = row.submitted === false;
       const isUnclaimed = !isSubmitted && !isFailed;
-      const isDraft = (rating as any).isDraft === true; // <--- Added
+      const isDraft = (rating as any).isDraft === true;
 
       if (filters.reviewStatus === "Submitted") return isSubmitted;
-      if (filters.reviewStatus === "Failed") return isFailed;
+      if (filters.reviewStatus === "Resolved")
+        return isFailed && row.resolved === true;
+      if (filters.reviewStatus === "Failed")
+        return isFailed && row.resolved !== true;
       if (filters.reviewStatus === "Reviewed")
         return isUnclaimed && !isDraft && !isEmpty && isComplete;
       if (filters.reviewStatus === "In progress")
@@ -156,7 +156,7 @@ export function useSessions({
 
   const clearFilters = useCallback(() => setFilters(initialFilters), []);
 
-  // ---------- submitRating and exportCSV ----------
+  // ---------- submitRating ----------
   const submitRating = useCallback(
     async (
       sessionId: string,
@@ -166,7 +166,6 @@ export function useSessions({
     ) => {
       const isEmpty = isRatingEmpty(submittedRatings);
 
-      // Extract isDraft so we don't send it to the API
       const { isDraft, ...networkRatings } = submittedRatings as Ratings & {
         isDraft?: boolean;
       };
@@ -174,6 +173,7 @@ export function useSessions({
       const payload: any = {
         sessionId,
         faceVisible,
+        isDraft: isDraft === true,
         ...(isEmpty ? {} : { ratings: networkRatings }),
       };
       if (systemRating !== undefined) {
@@ -192,7 +192,7 @@ export function useSessions({
         setRatings((prev) => {
           const newRatings = { ...prev };
           if (isEmpty) delete newRatings[sessionId];
-          else newRatings[sessionId] = submittedRatings; // Keep isDraft locally
+          else newRatings[sessionId] = submittedRatings;
           return newRatings;
         });
 
@@ -213,6 +213,38 @@ export function useSessions({
       }
     },
     [ratingsEndpoint],
+  );
+
+  // ---------- toggleResolved (failed → resolved) ----------
+  const toggleResolved = useCallback(
+    async (sessionId: string, resolved: boolean) => {
+      try {
+        const res = await fetch(
+          `http://localhost:5000/api/sessions/${sessionId}/resolve`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ resolved }),
+          },
+        );
+        if (!res.ok) throw new Error("Failed to update resolution");
+        const data = await res.json();
+        if (data.session) {
+          setRows((prevRows) =>
+            prevRows.map((row) =>
+              row.sessionId === data.session.sessionId ? data.session : row,
+            ),
+          );
+        }
+        return { success: true };
+      } catch (err) {
+        return {
+          success: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+        };
+      }
+    },
+    [],
   );
 
   const exportCSV = useCallback(async () => {
@@ -240,14 +272,13 @@ export function useSessions({
     }
   }, [exportEndpoint]);
 
-  // ---------- reviewedCount ----------
   const reviewedCount = useMemo(
     () =>
       rows.filter((r) => {
         if (r.submitted === true) return true;
         if (r.submitted === false) return true;
         const rating = ratings[r.sessionId];
-        if ((rating as any)?.isDraft) return false; // Drafts are in progress
+        if ((rating as any)?.isDraft) return false;
         return rating !== undefined && isRatingComplete(rating);
       }).length,
     [rows, ratings],
@@ -266,6 +297,7 @@ export function useSessions({
     clearFilters,
     hasActiveFilters,
     submitRating,
+    toggleResolved,
     exportCSV,
     refetch: fetchSessions,
   };

@@ -286,7 +286,6 @@ export function RatingModal({
   const [showMidciDialog, setShowMidciDialog] = useState(false);
   const [copiedSessionId, setCopiedSessionId] = useState(false);
   const [commentCopied, setCommentCopied] = useState(false); // ← new
-  const [crosscheckCopied, setCrosscheckCopied] = useState(false); // ← new
   const commentRef = useRef<HTMLTextAreaElement>(null);
   const crosscheckCommentRef = useRef<HTMLTextAreaElement>(null);
 
@@ -633,19 +632,6 @@ export function RatingModal({
       .then(() => {
         setCommentCopied(true);
         window.setTimeout(() => setCommentCopied(false), 1500);
-      })
-      .catch(console.error);
-  };
-
-  // ← new
-  const handleCopyCrosscheckComment = () => {
-    const text = rating.crosscheckComment || "";
-    if (!text) return;
-    navigator.clipboard
-      .writeText(text)
-      .then(() => {
-        setCrosscheckCopied(true);
-        window.setTimeout(() => setCrosscheckCopied(false), 1500);
       })
       .catch(console.error);
   };

@@ -299,6 +299,10 @@ export function RatingModal({
   const crosscheckComment = rating.crosscheckComment || "";
   const isApproved = crosscheckComment === "Ok";
 
+  // The modal was opened on top of a previously-saved draft. Used purely
+  // for UI signalling: badge in the header, and the "Skip"→"Cancel" label.
+  const isLoadedDraft = !isCrosscheck && (initial as any)?.isDraft === true;
+
   const isLinkMismatch = !row.link.endsWith(row.sessionId);
   const hasAlerts = !!(row.duplicate || isLinkMismatch || row.personalGmail);
 
@@ -486,7 +490,7 @@ export function RatingModal({
     setCommentManuallyEdited(false);
   };
 
-  // Helper for the new preset shortcuts
+  // Helper for the preset shortcuts
   const handlePresetScenario = (commentText: string) => {
     if (readOnly) return;
     setRating((prev) => ({
@@ -627,9 +631,26 @@ export function RatingModal({
     onSubmit(rating, systemRating, faceVisible, isDraft);
   };
 
+  // Alt+S and the "Save draft / Skip / Cancel" button both route here.
+  //   – Draft loaded + rating complete → Cancel (discard edits, close)
+  //   – Anything else                  → save as draft (existing behaviour)
+  const handleSkipOrCancel = () => {
+    if (readOnly) return;
+    if (isLoadedDraft && complete) {
+      onClose();
+      return;
+    }
+    handleSubmitClick(true);
+  };
+
   const handleSubmitClickRef = useRef(handleSubmitClick);
   useEffect(() => {
     handleSubmitClickRef.current = handleSubmitClick;
+  });
+
+  const handleSkipOrCancelRef = useRef(handleSkipOrCancel);
+  useEffect(() => {
+    handleSkipOrCancelRef.current = handleSkipOrCancel;
   });
 
   // ---- STABLE EVENT LISTENER ----
@@ -745,8 +766,12 @@ export function RatingModal({
         }
       }
 
-      // Alt + 1-9 (Maps to specific fields using e.code)
-      if (e.altKey && e.code.startsWith("Digit") && !s.readOnly) {
+      // Field toggles: Alt+1-9 (existing) OR Ctrl/Cmd+Shift+1-9 (new).
+      if (
+        (e.altKey || ((e.ctrlKey || e.metaKey) && e.shiftKey)) &&
+        e.code.startsWith("Digit") &&
+        !s.readOnly
+      ) {
         const num = e.code.replace("Digit", "");
         const fieldMap: Record<
           string,
@@ -807,10 +832,10 @@ export function RatingModal({
           e.preventDefault();
           s.update("slowLoading", !s.rating.slowLoading);
         } else if (e.code === "KeyS") {
-          // Save draft / skip (review mode only – crosscheck has no draft state)
+          // Save draft / skip / cancel (review mode only)
           if (!s.isCrosscheck) {
             e.preventDefault();
-            handleSubmitClickRef.current(true);
+            handleSkipOrCancelRef.current();
           }
         } else if (e.code === "KeyM") {
           e.preventDefault();
@@ -905,6 +930,33 @@ export function RatingModal({
 
   const sectionDivider = "pt-5 border-t border-slate-100";
 
+  // Footer button label/tooltip for the secondary action.
+  const secondaryAction: {
+    label: string;
+    title: string;
+    handler: () => void;
+  } = (() => {
+    if (isLoadedDraft && complete) {
+      return {
+        label: "Cancel",
+        title: "Discard changes and close (Alt+S)",
+        handler: handleSkipOrCancel,
+      };
+    }
+    if (complete) {
+      return {
+        label: "Skip",
+        title: "Skip this session without submitting (Alt+S)",
+        handler: handleSkipOrCancel,
+      };
+    }
+    return {
+      label: "Save draft",
+      title: "Save progress without submitting (Alt+S)",
+      handler: handleSkipOrCancel,
+    };
+  })();
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 p-0 sm:p-4">
       <div
@@ -932,6 +984,14 @@ export function RatingModal({
               >
                 {row.task}
               </h2>
+              {isLoadedDraft && (
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wider text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shrink-0"
+                  title="This session was loaded from a saved draft"
+                >
+                  <Edit3 size={10} /> Draft
+                </span>
+              )}
               {row.new && (
                 <span
                   className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wider text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded shrink-0"
@@ -1095,7 +1155,7 @@ export function RatingModal({
                         tone="severity"
                         disabled={readOnly}
                         compact
-                        title={`Toggle ${f.label} (Alt+${shortcutNum})`}
+                        title={`Toggle ${f.label} (Alt+${shortcutNum} or Ctrl+Shift+${shortcutNum})`}
                       />
                     );
                   })}
@@ -1115,7 +1175,7 @@ export function RatingModal({
                     styleMap={SEATED_STYLE_MAP}
                     disabled={readOnly}
                     compact
-                    title="Toggle Seated (Alt+7)"
+                    title="Toggle Seated (Alt+7 or Ctrl+Shift+7)"
                   />
 
                   <SegmentedField<Environment>
@@ -1126,7 +1186,7 @@ export function RatingModal({
                     styleMap={ENVIRONMENT_STYLE_MAP}
                     disabled={readOnly}
                     compact
-                    title="Toggle Environment (Alt+8)"
+                    title="Toggle Environment (Alt+8 or Ctrl+Shift+8)"
                   />
 
                   <div className="sm:col-span-2">
@@ -1138,7 +1198,7 @@ export function RatingModal({
                       tone="severity"
                       disabled={readOnly}
                       compact
-                      title="Toggle Other (Alt+9). Presets: Alt+Shift+1 (Residential), Alt+Shift+2 (Non-head mounted), Alt+Shift+3 (Object close)"
+                      title="Toggle Other (Alt+9 or Ctrl+Shift+9). Presets: Alt+Shift+1 (Residential), Alt+Shift+2 (Non-head mounted), Alt+Shift+3 (Object close)"
                     />
                   </div>
                 </div>
@@ -1599,15 +1659,11 @@ export function RatingModal({
               <>
                 {!isCrosscheck && (
                   <button
-                    onClick={() => handleSubmitClick(true)}
+                    onClick={secondaryAction.handler}
                     className={BTN_GHOST}
-                    title={
-                      complete
-                        ? "Skip this session without submitting (Alt+S)"
-                        : "Save progress without submitting (Alt+S)"
-                    }
+                    title={secondaryAction.title}
                   >
-                    {complete ? "Skip" : "Save draft"}
+                    {secondaryAction.label}
                   </button>
                 )}
                 <button

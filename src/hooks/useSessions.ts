@@ -43,6 +43,16 @@ interface UseSessionsOptions {
   exportEndpoint: string;
 }
 
+/**
+ * Ensures a failed/resolved session always carries a `reason`.
+ */
+function augmentRow(row: any): any {
+  if (row.submitted === false && !row.reason) {
+    return { ...row, reason: "Unknown error" };
+  }
+  return row;
+}
+
 export function useSessions({
   endpoint,
   ratingsEndpoint,
@@ -61,9 +71,10 @@ export function useSessions({
       const res = await fetch(`http://localhost:5000${endpoint}`);
       if (!res.ok) throw new Error("Failed to fetch sessions");
       const data = await res.json();
-      setRows(data);
+      const augmented = (data as any[]).map(augmentRow);
+      setRows(augmented);
       const initialRatings: Record<string, Ratings> = {};
-      data.forEach((row: SessionRow) => {
+      augmented.forEach((row: SessionRow) => {
         if (row.ratings && !isRatingEmpty(row.ratings)) {
           initialRatings[row.sessionId] = row.ratings;
         }
@@ -80,7 +91,6 @@ export function useSessions({
     fetchSessions();
   }, [fetchSessions]);
 
-  // ---------- Base filtered rows (everything except reviewStatus) ----------
   const baseFilteredRows = useMemo(() => {
     const searchTerm = filters.taskSearch.trim().toLowerCase();
     return rows.filter((row) => {
@@ -118,7 +128,6 @@ export function useSessions({
     });
   }, [rows, ratings, filters]);
 
-  // ---------- Final filtered rows (base + reviewStatus) ----------
   const filteredRows = useMemo(() => {
     return baseFilteredRows.filter((row) => {
       const rating = ratings[row.sessionId] || {};
@@ -141,7 +150,7 @@ export function useSessions({
       if (filters.reviewStatus === "Pending")
         return isUnclaimed && !isDraft && isEmpty;
 
-      return true; // "All"
+      return true;
     });
   }, [baseFilteredRows, ratings, filters.reviewStatus]);
 
@@ -156,7 +165,6 @@ export function useSessions({
 
   const clearFilters = useCallback(() => setFilters(initialFilters), []);
 
-  // ---------- submitRating ----------
   const submitRating = useCallback(
     async (
       sessionId: string,
@@ -165,7 +173,6 @@ export function useSessions({
       faceVisible?: boolean,
     ) => {
       const isEmpty = isRatingEmpty(submittedRatings);
-
       const { isDraft, ...networkRatings } = submittedRatings as Ratings & {
         isDraft?: boolean;
       };
@@ -199,11 +206,12 @@ export function useSessions({
         if (updatedSession) {
           setRows((prevRows) =>
             prevRows.map((row) =>
-              row.sessionId === updatedSession.sessionId ? updatedSession : row,
+              row.sessionId === updatedSession.sessionId
+                ? (augmentRow({ ...row, ...updatedSession }) as SessionRow)
+                : row,
             ),
           );
         }
-
         return { success: true, data };
       } catch (err) {
         return {
@@ -215,7 +223,35 @@ export function useSessions({
     [ratingsEndpoint],
   );
 
-  // ---------- toggleResolved (failed → resolved) ----------
+  const updateReason = useCallback(
+    async (sessionId: string, reason: string) => {
+      setRows((prevRows) =>
+        prevRows.map((row) =>
+          row.sessionId === sessionId ? { ...row, reason } : row,
+        ),
+      );
+
+      try {
+        const res = await fetch(
+          `http://localhost:5000/api/sessions/${sessionId}/reason`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reason }),
+          },
+        );
+        if (!res.ok) throw new Error("Failed to update reason");
+        return { success: true };
+      } catch (err) {
+        return {
+          success: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+        };
+      }
+    },
+    [],
+  );
+
   const toggleResolved = useCallback(
     async (sessionId: string, resolved: boolean) => {
       try {
@@ -232,7 +268,9 @@ export function useSessions({
         if (data.session) {
           setRows((prevRows) =>
             prevRows.map((row) =>
-              row.sessionId === data.session.sessionId ? data.session : row,
+              row.sessionId === data.session.sessionId
+                ? (augmentRow({ ...row, ...data.session }) as SessionRow)
+                : row,
             ),
           );
         }
@@ -297,6 +335,7 @@ export function useSessions({
     clearFilters,
     hasActiveFilters,
     submitRating,
+    updateReason,
     toggleResolved,
     exportCSV,
     refetch: fetchSessions,

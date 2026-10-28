@@ -1,5 +1,6 @@
 // components/SessionReviewDashboard.tsx
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Download,
   Star,
@@ -17,6 +18,8 @@ import {
   Terminal,
   Eye,
   RotateCcw,
+  ArrowUpDown,
+  MoreHorizontal,
 } from "lucide-react";
 import { SessionRow, Ratings } from "../utilities/types";
 import { FONT_DISPLAY, FONT_UI, FONT_DATA } from "../utilities/constants";
@@ -39,6 +42,44 @@ import { SessionLink } from "./SessionLink";
 const AUTO_NEXT_STORAGE_KEY = "sessionQa.autoNext";
 const APP_NAV_OFFSET = 56;
 
+const shortId = (id: string) =>
+  id.length > 14 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id;
+
+const STATUS_GROUPS = [
+  { key: "failed", label: "Failed" },
+  { key: "pending", label: "Pending" },
+  { key: "inProgress", label: "In progress" },
+  { key: "reviewed", label: "Reviewed" },
+  { key: "submitted", label: "Submitted" },
+  { key: "resolved", label: "Resolved" },
+];
+const GROUP_PREVIEW_COUNT = 1;
+
+type DisplayItem =
+  | { type: "row"; row: SessionRow; index: number }
+  | {
+      type: "header";
+      key: string;
+      label: string;
+      count: number;
+      expanded: boolean;
+      collapsible: boolean;
+    };
+
+function getStatusKey(row: SessionRow, rating: Ratings | undefined): string {
+  if (row.submitted === true) return "submitted";
+  if (row.submitted === false) return row.resolved ? "resolved" : "failed";
+  const isDraft = (rating as any)?.isDraft === true;
+  if (isDraft) return "inProgress";
+  if (rating && isRatingComplete(rating)) return "reviewed";
+  if (rating && !isRatingEmpty(rating)) return "inProgress";
+  return "pending";
+}
+
+function getReason(row: SessionRow): string {
+  return ((row as any).reason as string) || "Unknown error";
+}
+
 export function SessionReviewDashboard() {
   const {
     filteredRows,
@@ -46,6 +87,7 @@ export function SessionReviewDashboard() {
     rows,
     ratings,
     submitRating,
+    updateReason,
     toggleResolved,
     exportCSV,
     filters,
@@ -81,6 +123,13 @@ export function SessionReviewDashboard() {
       localStorage.setItem(AUTO_NEXT_STORAGE_KEY, autoNext ? "1" : "0");
     } catch {}
   }, [autoNext]);
+
+  // --- NEW: State to force DailyTracker to refresh ---
+  const [dailyRefreshKey, setDailyRefreshKey] = useState(0);
+  const bumpDailyStats = useCallback(
+    () => setDailyRefreshKey((k) => k + 1),
+    [],
+  );
 
   const findNextUnratedRow = useCallback(
     (currentSessionId: string): SessionRow | undefined => {
@@ -152,11 +201,13 @@ export function SessionReviewDashboard() {
       return;
     }
 
+    // --- NEW: Bump daily stats if a manual rating was saved ---
+    bumpDailyStats();
+
     if (nextRow) {
       showToast(`Review saved · next: ${nextRow.email}`);
       setReviewingRowId(nextRow.sessionId);
       setActiveRow(nextRow);
-
       window.setTimeout(() => scrollRowIntoView(nextRow.sessionId), 100);
     } else {
       showToast(
@@ -182,6 +233,116 @@ export function SessionReviewDashboard() {
     }
   };
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const resolvableRows = filteredRows.filter(
+    (r) => r.submitted === false && r.resolved !== true,
+  );
+  const selectedRows = resolvableRows.filter((r) =>
+    selectedIds.has(r.sessionId),
+  );
+  const allResolvableSelected =
+    resolvableRows.length > 0 && selectedRows.length === resolvableRows.length;
+
+  const toggleSelected = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const toggleSelectAll = () =>
+    setSelectedIds(
+      allResolvableSelected
+        ? new Set()
+        : new Set(resolvableRows.map((r) => r.sessionId)),
+    );
+
+  const handleBulkResolve = async () => {
+    const targets = selectedRows;
+    const results = await Promise.all(
+      targets.map((r) => toggleResolved(r.sessionId, true)),
+    );
+    const ok = results.filter((r) => r.success).length;
+    showToast(
+      ok === targets.length
+        ? `Marked ${ok} ${ok === 1 ? "session" : "sessions"} as resolved`
+        : `Resolved ${ok} of ${targets.length} · some failed`,
+    );
+    setSelectedIds(new Set());
+  };
+
+  const handleCopyId = (id: string) => {
+    navigator.clipboard
+      .writeText(id)
+      .then(() => showToast("Session ID copied"))
+      .catch(() => showToast("Failed to copy session ID"));
+  };
+
+  const [commentRow, setCommentRow] = useState<SessionRow | null>(null);
+
+  const handleSaveReason = async (row: SessionRow, reason: string) => {
+    const result = await updateReason(row.sessionId, reason);
+    if (result.success) {
+      showToast(`Reason saved for ${row.email}`);
+      setCommentRow(null);
+    } else {
+      showToast("Failed to save reason");
+    }
+  };
+
+  const [sortByStatus, setSortByStatus] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
+    () => new Set(["failed", "pending"]),
+  );
+
+  const toggleGroup = (key: string) =>
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  const displayItems = useMemo<DisplayItem[]>(() => {
+    if (!sortByStatus) {
+      return filteredRows.map((row, index) => ({
+        type: "row" as const,
+        row,
+        index,
+      }));
+    }
+
+    const buckets: Record<string, SessionRow[]> = {};
+    filteredRows.forEach((row) => {
+      const key = getStatusKey(row, ratings[row.sessionId]);
+      if (!buckets[key]) buckets[key] = [];
+      buckets[key].push(row);
+    });
+
+    const items: DisplayItem[] = [];
+    let index = 0;
+    STATUS_GROUPS.forEach((g) => {
+      const groupRows = buckets[g.key];
+      if (!groupRows || groupRows.length === 0) return;
+
+      const expanded = expandedGroups.has(g.key);
+      items.push({
+        type: "header",
+        key: g.key,
+        label: g.label,
+        count: groupRows.length,
+        expanded,
+        collapsible: groupRows.length > GROUP_PREVIEW_COUNT,
+      });
+      (expanded ? groupRows : groupRows.slice(0, GROUP_PREVIEW_COUNT)).forEach(
+        (row) => items.push({ type: "row", row, index: index++ }),
+      );
+    });
+    return items;
+  }, [filteredRows, ratings, sortByStatus, expandedGroups]);
+
   const handleDownload = async () => {
     const result = await exportCSV();
     if (!result.success) {
@@ -189,7 +350,6 @@ export function SessionReviewDashboard() {
     }
   };
 
-  // ----- "Jump to unrated" logic -----
   const firstUnratedRow = filteredRows.find((row) =>
     isRatingEmpty(ratings[row.sessionId] || {}),
   );
@@ -240,7 +400,6 @@ export function SessionReviewDashboard() {
 
   const hoveredRating = hoveredRowId ? ratings[hoveredRowId] : undefined;
 
-  // ----- Stats & progress (6 statuses) -----
   const stats = useMemo(() => {
     let submitted = 0;
     let failed = 0;
@@ -340,7 +499,6 @@ export function SessionReviewDashboard() {
   return (
     <div className="min-h-screen bg-[#F7F8FA]" style={{ fontFamily: FONT_UI }}>
       <div className="max-w-[1600px] mx-auto px-4 sm:px-6 pt-8 pb-24">
-        {/* ───────── PAGE HEADER (scrolls away) ───────── */}
         <header className="flex flex-col gap-6 mb-6">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
             <div>
@@ -367,20 +525,24 @@ export function SessionReviewDashboard() {
                 className="group inline-flex items-center gap-2.5 text-sm font-medium text-slate-600 hover:text-slate-900 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40"
               >
                 <span
-                  className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-                    autoNext ? "bg-blue-600" : "bg-slate-300"
-                  }`}
+                  className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${autoNext ? "bg-blue-600" : "bg-slate-300"}`}
                 >
                   <span
-                    className={`cursor-pointer inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-                      autoNext ? "translate-x-[18px]" : "translate-x-0.5"
-                    }`}
+                    className={`cursor-pointer inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${autoNext ? "translate-x-[18px]" : "translate-x-0.5"}`}
                   />
                 </span>
                 Auto-next
               </button>
 
-              <RunAutoRaterButton onComplete={refetch} onToast={showToast} />
+              <RunAutoRaterButton
+                onComplete={() => {
+                  refetch();
+                  bumpDailyStats();
+                }}
+                onProgress={bumpDailyStats}
+                onToast={showToast}
+                reviewedCount={reviewedCount}
+              />
 
               <button
                 onClick={handleDownload}
@@ -392,7 +554,6 @@ export function SessionReviewDashboard() {
             </div>
           </div>
 
-          {/* Progress — one bar, six-segment legend */}
           <div>
             <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 mb-2.5">
               <p className="text-sm text-slate-600">
@@ -405,14 +566,11 @@ export function SessionReviewDashboard() {
                 of {totalCount} handled
                 <span className="text-slate-400"> · {handledPct}%</span>
               </p>
-
               <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
                 {progressSegments.map((s) => (
                   <li
                     key={s.key}
-                    className={`inline-flex items-center gap-1.5 ${
-                      s.count === 0 ? "opacity-50" : ""
-                    }`}
+                    className={`inline-flex items-center gap-1.5 ${s.count === 0 ? "opacity-50" : ""}`}
                   >
                     <span className={`h-2 w-2 rounded-full ${s.bar}`} />
                     {s.label}
@@ -426,7 +584,6 @@ export function SessionReviewDashboard() {
                 ))}
               </ul>
             </div>
-
             <div
               role="progressbar"
               aria-label="Review progress"
@@ -447,11 +604,10 @@ export function SessionReviewDashboard() {
                 ))}
             </div>
           </div>
-
-          <DailyTracker days={14} />
+          {/* Pass the refresh key here so it updates as the auto-rater polls */}
+          <DailyTracker days={14} refreshKey={dailyRefreshKey} />
         </header>
 
-        {/* ───────── STICKY TOOLBAR ───────── */}
         <div
           className="sticky z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 mb-4 bg-[#F7F8FA]/90 backdrop-blur-md border-b border-slate-200/70"
           style={{ top: APP_NAV_OFFSET }}
@@ -472,17 +628,11 @@ export function SessionReviewDashboard() {
                     onClick={() =>
                       setFilters((f) => ({ ...f, reviewStatus: tab.key }))
                     }
-                    className={`cursor-pointer shrink-0 flex-1 lg:flex-none inline-flex justify-center items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 ${
-                      isActive
-                        ? "bg-white text-slate-900 shadow-sm"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
+                    className={`cursor-pointer shrink-0 flex-1 lg:flex-none inline-flex justify-center items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 ${isActive ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
                   >
                     {tab.label}
                     <span
-                      className={`text-xs tabular-nums ${
-                        isActive ? "text-slate-500" : "text-slate-400"
-                      }`}
+                      className={`text-xs tabular-nums ${isActive ? "text-slate-500" : "text-slate-400"}`}
                     >
                       {tab.count}
                     </span>
@@ -492,6 +642,17 @@ export function SessionReviewDashboard() {
             </div>
 
             <div className="flex items-center gap-2 w-full lg:w-auto">
+              <button
+                type="button"
+                aria-pressed={sortByStatus}
+                aria-label="Sort by status"
+                onClick={() => setSortByStatus((v) => !v)}
+                title="Group sessions by status"
+                className={`cursor-pointer shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 ${sortByStatus ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:border-slate-300"}`}
+              >
+                <ArrowUpDown size={15} />
+                <span className="hidden sm:inline">Sort by status</span>
+              </button>
               <div className="flex-1 lg:w-64 lg:flex-none">
                 <TaskSearchInput filters={filters} setFilters={setFilters} />
               </div>
@@ -505,12 +666,42 @@ export function SessionReviewDashboard() {
           </div>
         </div>
 
-        {/* Table (desktop) */}
         <div className="hidden lg:block bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          {selectedRows.length > 0 && (
+            <div className="flex items-center gap-3 px-5 py-2.5 bg-sky-50 border-b border-sky-200 text-sm text-sky-900">
+              <span className="font-medium">
+                {selectedRows.length} selected
+              </span>
+              <button
+                onClick={handleBulkResolve}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-600 text-white hover:bg-sky-700 transition-colors cursor-pointer"
+              >
+                <CheckCircle2 size={13} /> Mark resolved
+              </button>
+              <button
+                onClick={() => setSelectedIds(new Set())}
+                className="text-xs font-medium text-sky-800 hover:underline cursor-pointer"
+              >
+                Clear
+              </button>
+            </div>
+          )}
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-200 text-left text-[10.5px] uppercase tracking-wider text-slate-400">
-                <th className="px-5 py-3 font-semibold">Device / Email</th>
+                <th className="px-5 py-3 font-semibold">
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all failed sessions"
+                      checked={allResolvableSelected}
+                      disabled={resolvableRows.length === 0}
+                      onChange={toggleSelectAll}
+                      className="w-4 h-4 cursor-pointer rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+                    />
+                    Device / Email
+                  </div>
+                </th>
                 <th className="px-5 py-3 font-semibold">Session ID</th>
                 <th className="px-5 py-3 font-semibold">Task</th>
                 <th className="px-5 py-3 font-semibold">Duration</th>
@@ -521,7 +712,34 @@ export function SessionReviewDashboard() {
               </tr>
             </thead>
             <tbody>
-              {filteredRows.map((row, i) => {
+              {displayItems.map((item) => {
+                if (item.type === "header") {
+                  return (
+                    <tr
+                      key={`hdr-${item.key}`}
+                      className="bg-slate-50 border-b border-slate-200"
+                    >
+                      <td colSpan={8} className="px-5 py-2.5 align-middle">
+                        <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
+                          <span>
+                            {item.label} · {item.count}
+                          </span>
+                          {item.collapsible && (
+                            <button
+                              type="button"
+                              onClick={() => toggleGroup(item.key)}
+                              aria-expanded={item.expanded}
+                              className="font-medium text-slate-500 hover:text-slate-800 rounded transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40"
+                            >
+                              {item.expanded ? "Show less" : "Show all"}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+                const { row, index: i } = item;
                 const rating = ratings[row.sessionId];
                 const isSubmitted = row.submitted === true;
                 const isFailed = row.submitted === false;
@@ -541,97 +759,91 @@ export function SessionReviewDashboard() {
                     onMouseEnter={(e) => handleRowEnter(row.sessionId, e)}
                     onMouseLeave={handleRowLeave}
                     className={`border-b border-slate-100 last:border-0 transition-colors ${
-                      i % 2 === 1 ? "bg-slate-50/40" : ""
-                    } ${
-                      isHighlighted
-                        ? "bg-blue-50/30 hover:bg-blue-50/50"
-                        : "hover:bg-slate-50/70"
-                    }`}
+                      i % 2 === 1 && !(isFailed && !isResolved)
+                        ? "bg-slate-50/40"
+                        : ""
+                    } ${isResolved ? "opacity-70 hover:opacity-100" : ""} ${isHighlighted ? "bg-blue-50/30 hover:bg-blue-50/50" : "hover:bg-slate-50/70"}`}
                   >
                     <td
-                      className={`py-4 font-medium text-slate-700 transition-[border-color,padding] ${
+                      className={`py-4 align-middle font-medium text-slate-700 transition-[border-color,padding] ${
                         isHighlighted
                           ? "pl-4 pr-5 border-l-4 border-l-blue-600"
-                          : "pl-5 pr-5"
+                          : isFailed && !isResolved
+                            ? "pl-4 pr-5 border-l-4 border-l-rose-300"
+                            : "pl-5 pr-5"
                       }`}
                     >
-                      <div className="flex items-center gap-1.5 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {isFailed && !isResolved ? (
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${row.email}`}
+                            checked={selectedIds.has(row.sessionId)}
+                            onChange={() => toggleSelected(row.sessionId)}
+                            className="w-4 h-4 cursor-pointer rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                        ) : (
+                          <span className="w-4 shrink-0" aria-hidden="true" />
+                        )}
                         <span>{row.email}</span>
-
-                        {isSubmitted && (
-                          <span title="Successfully submitted by auto-rater">
-                            <CheckCircle2
-                              size={14}
-                              className="text-emerald-500 shrink-0"
-                            />
-                          </span>
-                        )}
-                        {isFailed && (
-                          <span title="Auto-rater failed to submit (or not found in queue)">
-                            <XCircle
-                              size={14}
-                              className="text-rose-500 shrink-0"
-                            />
-                          </span>
-                        )}
-                        {isResolved && (
-                          <span title="Marked as manually resolved">
-                            <CheckCircle2
-                              size={14}
-                              className="text-sky-500 shrink-0"
-                            />
-                          </span>
-                        )}
                       </div>
-
                       {row.new && (
                         <span
-                          className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wider text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded mt-1"
+                          className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wider text-emerald-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded mt-1"
                           title="This session comes from a newly-created account"
                         >
                           <UserPlus size={11} /> New account
                         </span>
                       )}
                     </td>
-                    <td
-                      className="px-5 py-4 text-slate-500 text-[13px]"
-                      style={{ fontFamily: FONT_DATA }}
-                    >
-                      {row.sessionId}
+                    <td className="px-5 py-4 align-middle whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyId(row.sessionId)}
+                        title={`${row.sessionId} · click to copy`}
+                        className="text-[13px] text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded px-1 -mx-1 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40"
+                        style={{ fontFamily: FONT_DATA }}
+                      >
+                        {shortId(row.sessionId)}
+                      </button>
                     </td>
-                    <td className="px-5 py-4 text-slate-600">
+                    <td className="px-5 py-4 align-middle text-slate-600">
                       <div className="flex items-center gap-2">
                         <span>{row.task}</span>
                         {row.duplicate && (
                           <span
-                            className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wider text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded"
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wider text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded"
                             title="This sessionId appeared more than once in the QC input"
                           >
                             <Copy size={11} /> Duplicate
                           </span>
                         )}
                       </div>
+                      {isFailed && (
+                        <p className="text-xs text-red-400 mt-0.5">
+                          {getReason(row)}
+                        </p>
+                      )}
                     </td>
-
                     <td
-                      className="px-5 py-4 text-slate-600 text-[13px]"
+                      className="px-5 py-4 align-middle text-slate-600 text-[13px] whitespace-nowrap"
                       style={{ fontFamily: FONT_DATA }}
                     >
                       {row.minutes} min
                     </td>
                     <td
-                      className="px-5 py-4 text-slate-500 text-[13px]"
+                      className="px-5 py-4 align-middle text-slate-500 text-[13px]"
                       style={{ fontFamily: FONT_DATA }}
                     >
                       {formatTimestamp(row.recordedTimestamp)}
                     </td>
                     <td
-                      className="px-5 py-4 text-slate-500 text-[13px]"
+                      className="px-5 py-4 align-middle text-slate-500 text-[13px]"
                       style={{ fontFamily: FONT_DATA }}
                     >
                       {formatTimestamp(row.uploadedTimestamp)}
                     </td>
-                    <td className="px-5 py-4">
+                    <td className="px-5 py-4 align-middle">
                       <StatusBadge
                         isSubmitted={isSubmitted}
                         isFailed={isFailed}
@@ -641,80 +853,65 @@ export function SessionReviewDashboard() {
                         isDraft={isDraft}
                       />
                     </td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center justify-end gap-2 whitespace-nowrap">
-                        <SessionLink
-                          href={row.link}
-                          sessionId={row.sessionId}
-                          onOpen={(sessionId, href) => {
-                            handleOpenLink(sessionId);
-                            window.postMessage(
-                              { type: "OPEN_VIDEO_IN_SPLIT", url: href },
-                              "*",
-                            );
-                          }}
-                        />
-
+                    <td className="px-5 py-4 align-middle">
+                      <div className="flex items-center justify-end gap-2 whitespace-nowrap h-full">
                         {isFailed ? (
                           <>
+                            <RowActionsMenu
+                              isResolved={isResolved}
+                              onEditReason={() => setCommentRow(row)}
+                              onToggleResolved={() =>
+                                handleToggleResolved(row, !isResolved)
+                              }
+                            />
                             <button
                               onClick={() => {
                                 setReviewingRowId(row.sessionId);
                                 setActiveRow(row);
                               }}
-                              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 hover:text-slate-900 border border-slate-300 transition-all cursor-pointer whitespace-nowrap"
+                              className="inline-flex items-center justify-center gap-1.5 h-9 min-w-[110px] px-3 rounded-lg text-xs font-semibold border border-slate-200 bg-white text-blue-600 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 transition-all cursor-pointer whitespace-nowrap"
                             >
-                              <Eye size={13} />
-                              View review
+                              <Eye size={13} /> View rating
                             </button>
-
-                            {isResolved ? (
-                              <button
-                                onClick={() => handleToggleResolved(row, false)}
-                                title="Unmark as resolved"
-                                className="inline-flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-800 border border-slate-200 transition-all cursor-pointer whitespace-nowrap"
-                              >
-                                <RotateCcw size={13} />
-                                Unresolve
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => handleToggleResolved(row, true)}
-                                title="Mark this failed submission as manually resolved"
-                                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-sky-600 text-white hover:bg-sky-700 border-transparent shadow-sm shadow-sky-600/20 transition-all cursor-pointer whitespace-nowrap"
-                              >
-                                <CheckCircle2 size={13} />
-                                Mark resolved
-                              </button>
-                            )}
                           </>
                         ) : (
-                          <button
-                            onClick={() => {
-                              setReviewingRowId(row.sessionId);
-                              setActiveRow(row);
-                            }}
-                            className={`inline-flex items-center justify-center gap-1.5 min-w-[120px] px-3 py-2 rounded-lg text-xs font-semibold transition-all border cursor-pointer whitespace-nowrap ${
-                              isButtonDone
-                                ? "bg-slate-100 text-blue-500 hover:bg-blue-50 hover:text-blue-700 border-slate-300 hover:border-blue-300"
+                          <>
+                            <SessionLink
+                              href={row.link}
+                              sessionId={row.sessionId}
+                              onOpen={(sessionId, href) => {
+                                handleOpenLink(sessionId);
+                                window.postMessage(
+                                  { type: "OPEN_VIDEO_IN_SPLIT", url: href },
+                                  "*",
+                                );
+                              }}
+                            />
+                            <button
+                              onClick={() => {
+                                setReviewingRowId(row.sessionId);
+                                setActiveRow(row);
+                              }}
+                              className={`inline-flex items-center justify-center gap-1.5 h-9 min-w-[110px] px-3 rounded-lg text-xs font-semibold transition-all border cursor-pointer whitespace-nowrap ${
+                                !hasRating
+                                  ? "bg-blue-600 text-white hover:bg-blue-700 border-transparent shadow-sm shadow-blue-600/20"
+                                  : "bg-white text-blue-600 border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200"
+                              }`}
+                            >
+                              {isButtonDone ? (
+                                <SquarePen size={13} />
+                              ) : hasRating ? (
+                                <Play size={13} />
+                              ) : (
+                                <Star size={13} />
+                              )}
+                              {isButtonDone
+                                ? "Edit review"
                                 : hasRating
-                                  ? "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-blue-600 border-slate-300"
-                                  : "bg-blue-600 text-white hover:bg-blue-700 border-transparent shadow-sm shadow-blue-600/20"
-                            }`}
-                          >
-                            {isButtonDone ? (
-                              <SquarePen size={13} />
-                            ) : hasRating ? (
-                              <Play size={13} />
-                            ) : (
-                              <Star size={13} />
-                            )}
-                            {isButtonDone
-                              ? "Edit review"
-                              : hasRating
-                                ? "Update draft"
-                                : "Rate video"}
-                          </button>
+                                  ? "Edit draft"
+                                  : "Rate video"}
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>
@@ -737,7 +934,30 @@ export function SessionReviewDashboard() {
 
         {/* Mobile cards */}
         <div className="lg:hidden space-y-3">
-          {filteredRows.map((row) => {
+          {displayItems.map((item) => {
+            if (item.type === "header") {
+              return (
+                <div
+                  key={`hdr-${item.key}`}
+                  className="flex items-center justify-between pt-3 px-1 text-xs font-semibold text-slate-500"
+                >
+                  <span>
+                    {item.label} · {item.count}
+                  </span>
+                  {item.collapsible && (
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(item.key)}
+                      aria-expanded={item.expanded}
+                      className="font-medium text-slate-500 hover:text-slate-800 rounded transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40"
+                    >
+                      {item.expanded ? "Show less" : "Show all"}
+                    </button>
+                  )}
+                </div>
+              );
+            }
+            const row = item.row;
             const rating = ratings[row.sessionId];
             const isSubmitted = row.submitted === true;
             const isFailed = row.submitted === false;
@@ -758,8 +978,10 @@ export function SessionReviewDashboard() {
                 className={`bg-white rounded-xl border p-4 shadow-sm transition-all ${
                   isHighlighted
                     ? "border-l-4 border-l-blue-600 bg-blue-50/30 border-slate-200"
-                    : "border-slate-200"
-                }`}
+                    : isFailed && !isResolved
+                      ? "border-slate-200 border-l-4 border-l-rose-300"
+                      : "border-slate-200"
+                } ${isResolved ? "opacity-70" : ""}`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -767,29 +989,12 @@ export function SessionReviewDashboard() {
                       <p className="font-medium text-slate-800 text-sm truncate">
                         {row.email}
                       </p>
-
-                      {isSubmitted && (
-                        <CheckCircle2
-                          size={13}
-                          className="text-emerald-500 shrink-0"
-                        />
-                      )}
-                      {isFailed && (
-                        <XCircle size={13} className="text-rose-500 shrink-0" />
-                      )}
-                      {isResolved && (
-                        <CheckCircle2
-                          size={13}
-                          className="text-sky-500 shrink-0"
-                        />
-                      )}
                     </div>
-
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                       <p className="text-slate-500 text-sm">{row.task}</p>
                       {row.new && (
                         <span
-                          className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded"
+                          className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded"
                           title="This session comes from a newly-created account"
                         >
                           <UserPlus size={10} /> New
@@ -797,13 +1002,18 @@ export function SessionReviewDashboard() {
                       )}
                       {row.duplicate && (
                         <span
-                          className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded"
+                          className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded"
                           title="This sessionId appeared more than once in the QC input"
                         >
                           <Copy size={10} /> Duplicate
                         </span>
                       )}
                     </div>
+                    {isFailed && (
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {getReason(row)}
+                      </p>
+                    )}
                     <p
                       className="text-slate-400 text-[11px] mt-1 truncate"
                       style={{ fontFamily: FONT_DATA }}
@@ -862,77 +1072,66 @@ export function SessionReviewDashboard() {
                   </span>
                 </div>
                 <div className="flex items-center gap-2 mt-3">
-                  <SessionLink
-                    href={row.link}
-                    sessionId={row.sessionId}
-                    onOpen={(sessionId, href) => {
-                      handleOpenLink(sessionId);
-                      window.postMessage(
-                        { type: "OPEN_VIDEO_IN_SPLIT", url: href },
-                        "*",
-                      );
-                    }}
-                    fullWidth={true}
-                  />
                   {isFailed ? (
-                    <button
-                      onClick={() => {
-                        setReviewingRowId(row.sessionId);
-                        setActiveRow(row);
-                      }}
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 hover:text-slate-900 border border-slate-300"
-                    >
-                      <Eye size={13} /> View review
-                    </button>
+                    <>
+                      <RowActionsMenu
+                        isResolved={isResolved}
+                        onEditReason={() => setCommentRow(row)}
+                        onToggleResolved={() =>
+                          handleToggleResolved(row, !isResolved)
+                        }
+                      />
+                      <button
+                        onClick={() => {
+                          setReviewingRowId(row.sessionId);
+                          setActiveRow(row);
+                        }}
+                        className="flex-1 h-9 inline-flex items-center justify-center gap-1.5 px-3 rounded-lg text-xs font-semibold border border-slate-200 bg-white text-blue-600 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 transition-all"
+                      >
+                        <Eye size={13} /> View rating
+                      </button>
+                    </>
                   ) : (
-                    <button
-                      onClick={() => {
-                        setReviewingRowId(row.sessionId);
-                        setActiveRow(row);
-                      }}
-                      className={`flex-1 inline-flex items-center justify-center gap-1.5 min-w-[120px] px-3 py-2 rounded-lg text-xs font-semibold border cursor-pointer ${
-                        isButtonDone
-                          ? "bg-slate-100 text-blue-600 hover:bg-blue-50 hover:text-blue-700 border-slate-300 hover:border-blue-300"
+                    <>
+                      <SessionLink
+                        href={row.link}
+                        sessionId={row.sessionId}
+                        onOpen={(sessionId, href) => {
+                          handleOpenLink(sessionId);
+                          window.postMessage(
+                            { type: "OPEN_VIDEO_IN_SPLIT", url: href },
+                            "*",
+                          );
+                        }}
+                        fullWidth={true}
+                      />
+                      <button
+                        onClick={() => {
+                          setReviewingRowId(row.sessionId);
+                          setActiveRow(row);
+                        }}
+                        className={`flex-1 h-9 inline-flex items-center justify-center gap-1.5 px-3 rounded-lg text-xs font-semibold border cursor-pointer transition-all ${
+                          !hasRating
+                            ? "bg-blue-600 text-white hover:bg-blue-700 border-transparent shadow-sm shadow-blue-600/20"
+                            : "bg-white text-blue-600 border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200"
+                        }`}
+                      >
+                        {isButtonDone ? (
+                          <SquarePen size={13} />
+                        ) : hasRating ? (
+                          <Play size={13} />
+                        ) : (
+                          <Star size={13} />
+                        )}{" "}
+                        {isButtonDone
+                          ? "Edit review"
                           : hasRating
-                            ? "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-blue-600 border-slate-300"
-                            : "bg-blue-600 text-white hover:bg-blue-700 border-transparent shadow-sm shadow-blue-600/20"
-                      }`}
-                    >
-                      {isButtonDone ? (
-                        <SquarePen size={13} />
-                      ) : hasRating ? (
-                        <Play size={13} />
-                      ) : (
-                        <Star size={13} />
-                      )}{" "}
-                      {isButtonDone
-                        ? "Edit review"
-                        : hasRating
-                          ? "Update draft"
-                          : "Rate video"}
-                    </button>
+                            ? "Edit draft"
+                            : "Rate video"}
+                      </button>
+                    </>
                   )}
                 </div>
-                {isFailed && (
-                  <button
-                    onClick={() => handleToggleResolved(row, !isResolved)}
-                    className={`w-full mt-2 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${
-                      isResolved
-                        ? "bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-800 border-slate-200"
-                        : "bg-sky-600 text-white hover:bg-sky-700 border-transparent shadow-sm shadow-sky-600/20"
-                    }`}
-                  >
-                    {isResolved ? (
-                      <>
-                        <RotateCcw size={13} /> Unmark resolved
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 size={13} /> Mark as resolved
-                      </>
-                    )}
-                  </button>
-                )}
               </div>
             );
           })}
@@ -944,18 +1143,15 @@ export function SessionReviewDashboard() {
         </div>
       </div>
 
-      {/* Floating "Jump to unrated" */}
       {firstUnratedRow && !isUnratedVisible && !activeRow && (
         <button
           onClick={handleScrollToUnrated}
           className="cursor-pointer fixed bottom-6 right-6 z-30 inline-flex items-center gap-2 pl-3.5 pr-4 py-2.5 rounded-full bg-blue-600 text-white text-sm font-medium shadow-lg shadow-blue-900/20 hover:bg-blue-700 active:bg-blue-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 focus-visible:ring-offset-2"
         >
-          <LocateFixed size={15} />
-          Jump to unrated
+          <LocateFixed size={15} /> Jump to unrated
         </button>
       )}
 
-      {/* Hover summary */}
       {hoveredRowId && hoverRect && hoveredRating && (
         <div
           style={{
@@ -975,7 +1171,6 @@ export function SessionReviewDashboard() {
         </div>
       )}
 
-      {/* Modal — read-only for failed sessions */}
       {activeRow && (
         <RatingModal
           key={activeRow.sessionId}
@@ -998,7 +1193,16 @@ export function SessionReviewDashboard() {
         />
       )}
 
-      {/* Toast */}
+      {commentRow && (
+        <CommentDialog
+          key={commentRow.sessionId}
+          row={commentRow}
+          initial={(commentRow as any).reason || ""}
+          onClose={() => setCommentRow(null)}
+          onSave={(reason) => handleSaveReason(commentRow, reason)}
+        />
+      )}
+
       {toast && (
         <div
           role="status"
@@ -1012,9 +1216,219 @@ export function SessionReviewDashboard() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Status badge — 6 review states                                     */
-/* ------------------------------------------------------------------ */
+function RowActionsMenu({
+  isResolved,
+  onEditReason,
+  onToggleResolved,
+}: {
+  isResolved: boolean;
+  onEditReason: () => void;
+  onToggleResolved: () => void;
+}) {
+  const [pos, setPos] = useState<{
+    top?: number;
+    bottom?: number;
+    right: number;
+  } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const open = pos !== null;
+  const close = useCallback(() => setPos(null), []);
+
+  const toggle = () => {
+    if (open) {
+      close();
+      return;
+    }
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const right = window.innerWidth - rect.right;
+    setPos(
+      rect.bottom + 110 > window.innerHeight
+        ? { bottom: window.innerHeight - rect.top + 6, right }
+        : { top: rect.bottom + 6, right },
+    );
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        close();
+        btnRef.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open, close]);
+
+  const itemClass =
+    "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 focus:bg-slate-50 focus:outline-none cursor-pointer";
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="More actions"
+        title="More actions"
+        onClick={toggle}
+        className={`shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-lg border transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 ${
+          open
+            ? "bg-slate-100 border-slate-300 text-slate-800"
+            : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+        }`}
+      >
+        <MoreHorizontal size={16} />
+      </button>
+
+      {open &&
+        pos &&
+        createPortal(
+          <>
+            <div className="fixed inset-0 z-[70]" onClick={close} />
+            <div
+              role="menu"
+              style={{
+                position: "fixed",
+                top: pos.top,
+                bottom: pos.bottom,
+                right: pos.right,
+                fontFamily: FONT_UI,
+              }}
+              className="z-[71] w-48 rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                autoFocus
+                onClick={() => {
+                  close();
+                  onEditReason();
+                }}
+                className={itemClass}
+              >
+                <SquarePen size={14} className="text-slate-400" /> Edit reason
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  close();
+                  onToggleResolved();
+                }}
+                className={itemClass}
+              >
+                {isResolved ? (
+                  <RotateCcw size={14} className="text-slate-400" />
+                ) : (
+                  <CheckCircle2 size={14} className="text-slate-400" />
+                )}
+                {isResolved ? "Unmark as resolved" : "Mark as resolved"}
+              </button>
+            </div>
+          </>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+function CommentDialog({
+  row,
+  initial,
+  onClose,
+  onSave,
+}: {
+  row: SessionRow;
+  initial: string;
+  onClose: () => void;
+  onSave: (reason: string) => Promise<void>;
+}) {
+  const [text, setText] = useState(initial);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await onSave(text);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/40"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reason-dialog-title"
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-slate-200"
+        style={{ fontFamily: FONT_UI }}
+      >
+        <h3
+          id="reason-dialog-title"
+          className="text-[15px] font-semibold text-slate-900"
+          style={{ fontFamily: FONT_DISPLAY }}
+        >
+          Edit reason
+        </h3>
+        <p className="text-xs text-slate-500 mt-1 break-words">
+          {row.email} · {row.task}
+        </p>
+        <label htmlFor="session-reason" className="sr-only">
+          Reason
+        </label>
+        <textarea
+          id="session-reason"
+          autoFocus
+          rows={4}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Add a reason for this session…"
+          className="mt-4 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-400"
+          style={{ fontFamily: FONT_UI }}
+        />
+        <div className="flex justify-end gap-2 mt-5">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3.5 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving}
+            className="px-3.5 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors shadow-sm shadow-blue-600/20 cursor-pointer"
+          >
+            {saving ? "Saving…" : "Save reason"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function StatusBadge({
   isSubmitted,
@@ -1037,23 +1451,24 @@ function StatusBadge({
   const base = compact
     ? "inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium whitespace-nowrap"
     : "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap";
-  if (isSubmitted) {
+
+  if (isSubmitted)
     return (
       <span
-        className={`${base} text-emerald-600 bg-emerald-50 border border-emerald-200`}
+        className={`${base} text-emerald-700 bg-emerald-50 border border-emerald-200`}
       >
         <Send size={size} /> Submitted
       </span>
     );
-  }
-  if (isFailed && isResolved) {
+  if (isFailed && isResolved)
     return (
-      <span className={`${base} text-sky-700 bg-sky-50 border border-sky-200`}>
+      <span
+        className={`${base} text-emerald-700 bg-emerald-50 border border-emerald-200`}
+      >
         <CheckCircle2 size={size} /> Resolved
       </span>
     );
-  }
-  if (isFailed) {
+  if (isFailed)
     return (
       <span
         className={`${base} text-rose-700 bg-rose-50 border border-rose-200`}
@@ -1061,26 +1476,7 @@ function StatusBadge({
         <XCircle size={size} /> Failed
       </span>
     );
-  }
-  if (isDraft) {
-    return (
-      <span
-        className={`${base}  text-amber-700 bg-amber-50 border border-amber-200`}
-      >
-        <AlertTriangle size={size} /> In progress
-      </span>
-    );
-  }
-  if (isRated) {
-    return (
-      <span
-        className={`${base} text-teal-800 bg-teal-50 border border-teal-200`}
-      >
-        <CheckCircle2 size={size} /> Reviewed
-      </span>
-    );
-  }
-  if (hasRating) {
+  if (isDraft)
     return (
       <span
         className={`${base} text-amber-700 bg-amber-50 border border-amber-200`}
@@ -1088,31 +1484,47 @@ function StatusBadge({
         <AlertTriangle size={size} /> In progress
       </span>
     );
-  }
+  if (isRated)
+    return (
+      <span
+        className={`${base} text-emerald-700 bg-emerald-50 border border-emerald-200`}
+      >
+        <CheckCircle2 size={size} /> Reviewed
+      </span>
+    );
+  if (hasRating)
+    return (
+      <span
+        className={`${base} text-amber-700 bg-amber-50 border border-amber-200`}
+      >
+        <AlertTriangle size={size} /> In progress
+      </span>
+    );
 
   return (
     <span
-      className={`${base} text-slate-500 bg-slate-100 border border-slate-200`}
+      className={`${base} text-slate-600 bg-slate-100 border border-slate-200`}
     >
       <Circle size={size} /> Pending
     </span>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Auto-rater trigger + log modal (unchanged)                         */
-/* ------------------------------------------------------------------ */
-
 type RateStatus = "idle" | "running" | "success" | "failed";
 
 function RunAutoRaterButton({
   onComplete,
   onToast,
+  reviewedCount = 0,
+  onProgress, // NEW: Callback for live updates during run
 }: {
   onComplete?: () => void | Promise<void>;
   onToast?: (msg: string) => void;
+  reviewedCount?: number;
+  onProgress?: () => void; // NEW
 }) {
   const [status, setStatus] = useState<RateStatus>("idle");
+  const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [logs, setLogs] = useState("");
   const [starting, setStarting] = useState(false);
@@ -1127,20 +1539,38 @@ function RunAutoRaterButton({
         status: RateStatus;
         running: boolean;
         logs: string;
+        lastRunAt: string | null;
       } = await res.json();
 
-      setStatus(data.status);
+      let actualStatus = data.status;
+      if (
+        !data.running &&
+        (data.status === "success" || data.status === "failed")
+      ) {
+        if (
+          data.lastRunAt &&
+          localStorage.getItem("autoRaterAckRunAt") === data.lastRunAt
+        ) {
+          actualStatus = "idle";
+        }
+      }
+
+      setStatus(actualStatus);
+      setLastRunAt(data.lastRunAt);
       setLogs(data.logs || "");
+
+      // --- NEW: Notify parent to refresh stats while running ---
+      if (data.running) {
+        onProgress?.();
+      }
 
       if (!data.running) {
         if (pollRef.current) window.clearInterval(pollRef.current);
         pollRef.current = null;
-
-        if (data.status === "success") {
+        if (actualStatus === "success")
           onToast?.("Auto-rater finished successfully");
-        } else if (data.status === "failed") {
+        else if (actualStatus === "failed")
           onToast?.("Auto-rater finished with errors");
-        }
         await onComplete?.();
       }
     } catch (err) {
@@ -1148,13 +1578,11 @@ function RunAutoRaterButton({
       pollRef.current = null;
       setStatus("failed");
       setLogs(
-        `${logs}\n[client error] ${
-          err instanceof Error ? err.message : String(err)
-        }\n`,
+        `${logs}\n[client error] ${err instanceof Error ? err.message : String(err)}\n`,
       );
       onToast?.("Lost connection to auto-rater status endpoint");
     }
-  }, [onComplete, onToast, logs]);
+  }, [onComplete, onToast, logs, onProgress]); // Added onProgress to deps
 
   const startPolling = useCallback(() => {
     if (pollRef.current) window.clearInterval(pollRef.current);
@@ -1162,11 +1590,44 @@ function RunAutoRaterButton({
     void poll();
   }, [poll]);
 
+  const closeModal = () => {
+    setOpen(false);
+    if (status === "success" || status === "failed") {
+      setStatus("idle");
+      if (lastRunAt) {
+        localStorage.setItem("autoRaterAckRunAt", lastRunAt);
+      }
+    }
+  };
+
   const start = async () => {
+    if (status === "running" || starting) {
+      setOpen(true);
+      return;
+    }
+
+    if (status === "success" || status === "failed") {
+      setOpen(true);
+      return;
+    }
+
+    // Validate limit against the actual number of Reviewed sessions
+    const parsedLimit = parseInt(limit, 10);
+    if (!isNaN(parsedLimit) && parsedLimit > reviewedCount) {
+      onToast?.(
+        `Cannot run auto-rater - Limit: (${parsedLimit}), Reviewed sessions: (${reviewedCount}).`,
+      );
+      return;
+    }
+
+    if (reviewedCount === 0) {
+      onToast?.("Cannot run: No Reviewed sessions available to submit.");
+      return;
+    }
+
     setStarting(true);
     setOpen(true);
     try {
-      const parsedLimit = parseInt(limit, 10);
       const res = await fetch("http://localhost:5000/api/rate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1175,7 +1636,6 @@ function RunAutoRaterButton({
             isNaN(parsedLimit) || parsedLimit <= 0 ? undefined : parsedLimit,
         }),
       });
-
       if (res.status === 409) {
         // Already running
       } else if (!res.ok) {
@@ -1202,23 +1662,36 @@ function RunAutoRaterButton({
         const res = await fetch("http://localhost:5000/api/rate/status");
         const data = await res.json();
         if (cancelled) return;
-        setStatus(data.status);
+
+        let actualStatus = data.status;
+        if (
+          !data.running &&
+          (data.status === "success" || data.status === "failed")
+        ) {
+          if (
+            data.lastRunAt &&
+            localStorage.getItem("autoRaterAckRunAt") === data.lastRunAt
+          ) {
+            actualStatus = "idle";
+          }
+        }
+
+        setStatus(actualStatus);
+        setLastRunAt(data.lastRunAt);
         setLogs(data.logs || "");
         if (data.running) startPolling();
-      } catch {
-        /* ignore */
-      }
+      } catch {}
     })();
     return () => {
       cancelled = true;
       if (pollRef.current) window.clearInterval(pollRef.current);
       pollRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const running = status === "running" || starting;
-  const disabled = running;
+  const finished = status === "success" || status === "failed";
+  const disabled = starting;
 
   return (
     <>
@@ -1231,34 +1704,39 @@ function RunAutoRaterButton({
             title="Max submissions for this run (leave blank for unlimited)"
             value={limit}
             onChange={(e) => setLimit(e.target.value)}
-            disabled={disabled}
+            disabled={disabled || running}
             className="w-[60px] bg-transparent text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none disabled:opacity-50"
           />
         </div>
-
         <button
           onClick={start}
           disabled={disabled}
-          title="Run the auto-rater script"
+          title={
+            finished ? "View the auto-rater logs" : "Run the auto-rater script"
+          }
           className={`cursor-pointer inline-flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors focus:outline-none ${
             disabled
               ? "bg-slate-100 text-slate-400 cursor-not-allowed"
-              : "bg-slate-900 text-slate-100 hover:bg-slate-800"
+              : finished
+                ? "bg-slate-800 text-white hover:bg-slate-700"
+                : "bg-slate-900 text-slate-100 hover:bg-slate-800"
           }`}
         >
           {running ? (
             <Loader2 size={15} className="animate-spin text-amber-400" />
+          ) : finished ? (
+            <Eye size={15} className="text-amber-400" />
           ) : (
             <Terminal size={15} className="text-emerald-400" />
           )}
-          {running ? "Running…" : "Run"}
+          {running ? "Running…" : finished ? "View log" : "Run"}
         </button>
       </div>
 
       {open && (
         <div
           className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
-          onClick={() => status !== "running" && setOpen(false)}
+          onClick={closeModal}
         >
           <div
             className="bg-slate-900 text-slate-100 rounded-xl w-full max-w-3xl max-h-[80vh] flex flex-col shadow-2xl"
@@ -1266,8 +1744,7 @@ function RunAutoRaterButton({
           >
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
               <div className="text-sm font-medium flex items-center gap-2">
-                <Terminal size={16} className="text-slate-400" />
-                Auto-rater —
+                <Terminal size={16} className="text-slate-400" /> Auto-rater —
                 <span
                   className={
                     status === "success"
@@ -1290,9 +1767,7 @@ function RunAutoRaterButton({
                         await fetch("http://localhost:5000/api/rate/cancel", {
                           method: "POST",
                         });
-                      } catch {
-                        /* ignore */
-                      }
+                      } catch {}
                     }}
                     className="cursor-pointer text-xs px-2 py-1 rounded border border-rose-500/60 text-rose-300 hover:bg-rose-500/10"
                   >
@@ -1300,9 +1775,8 @@ function RunAutoRaterButton({
                   </button>
                 )}
                 <button
-                  onClick={() => setOpen(false)}
-                  disabled={status === "running"}
-                  className="cursor-pointer text-xs px-2 py-1 rounded border border-slate-600 disabled:opacity-40 hover:bg-slate-800"
+                  onClick={closeModal}
+                  className="cursor-pointer text-xs px-2 py-1 rounded border border-slate-600 hover:bg-slate-800"
                 >
                   Close
                 </button>
@@ -1322,23 +1796,19 @@ function findVisibleRowElement(sessionId: string): HTMLElement | null {
   const nodes = Array.from(
     document.querySelectorAll<HTMLElement>("[data-session-id]"),
   ).filter((el) => el.dataset.sessionId === sessionId);
-
   return nodes.find((el) => el.offsetParent !== null) ?? nodes[0] ?? null;
 }
 
 function scrollRowIntoView(sessionId: string, flash = false) {
   const el = findVisibleRowElement(sessionId);
   if (!el) return;
-
   const prefersReducedMotion = window.matchMedia(
     "(prefers-reduced-motion: reduce)",
   ).matches;
-
   el.scrollIntoView({
     behavior: prefersReducedMotion ? "auto" : "smooth",
     block: "center",
   });
-
   if (flash && !prefersReducedMotion) {
     el.animate(
       [

@@ -19,6 +19,25 @@ export interface DailyStats {
   today: number;
 }
 
+export interface DayHistorySubmission {
+  sessionId: string;
+  completedAt: string;
+  email?: string;
+  task?: string;
+  minutes?: string;
+  source?: string;
+}
+
+export interface DayHistory {
+  date: string;
+  timezone: string;
+  autoCount: number;
+  added: number;
+  finalCount: number;
+  submissions: DayHistorySubmission[];
+  today: string;
+}
+
 interface UseDailyStatsOptions {
   days?: number;
   tz?: string;
@@ -111,4 +130,49 @@ export function useDailyStats({
   );
 
   return { stats, loading, error, refetch: fetchStats, saveDay };
+}
+
+/**
+ * Fetches the breakdown for a single day: auto-submitted sessions,
+ * the manual adjustment delta, and the final total, plus the individual
+ * submissions that contributed to autoCount.
+ */
+export function useDayHistory({
+  date,
+  tz,
+}: {
+  date: string | null;
+  tz?: string;
+}) {
+  const [history, setHistory] = useState<DayHistory | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchHistory = useCallback(async () => {
+    if (!date) {
+      setHistory(null);
+      return;
+    }
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (tz) params.set("tz", tz);
+      const res = await fetch(
+        `${API_BASE}/api/stats/daily/${date}/history?${params.toString()}`,
+      );
+      if (!res.ok) throw new Error("Failed to fetch day history");
+      setHistory((await res.json()) as DayHistory);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }, [date, tz]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
+
+  return { history, loading, error, refetch: fetchHistory };
 }

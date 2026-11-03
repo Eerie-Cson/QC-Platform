@@ -233,6 +233,26 @@ export function SessionReviewDashboard() {
     }
   };
 
+  // --- NEW: Wrapper for resolving directly inside the RatingModal ---
+  const handleModalResolve = async (sessionId: string) => {
+    const rowToResolve = rows.find((r) => r.sessionId === sessionId);
+    if (!rowToResolve) return;
+
+    const result = await toggleResolved(sessionId, true);
+    if (result.success) {
+      showToast(`Marked ${rowToResolve.email} as resolved`);
+      // Instantly update the active row so the modal status badge changes
+      setActiveRow((prev) =>
+        prev && prev.sessionId === sessionId
+          ? { ...prev, resolved: true }
+          : prev,
+      );
+    } else {
+      showToast("Failed to update resolution");
+      throw new Error("Failed to update resolution");
+    }
+  };
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const resolvableRows = filteredRows.filter(
@@ -1181,6 +1201,7 @@ export function SessionReviewDashboard() {
             setReviewingRowId(null);
           }}
           onSubmit={handleSubmitRating}
+          onResolve={handleModalResolve} // <-- CONNECTED HERE
           mode="review"
           readOnly={activeRow.submitted === false}
           autoNext={autoNext}

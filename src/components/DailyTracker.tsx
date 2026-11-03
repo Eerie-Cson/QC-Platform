@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { CalendarDays, Check, ChevronDown, Minus, Plus, X } from "lucide-react";
+import {
+  CalendarDays,
+  Check,
+  ChevronDown,
+  History,
+  Minus,
+  Plus,
+  X,
+} from "lucide-react";
 import { FONT_DISPLAY, FONT_UI, FONT_DATA } from "../utilities/constants";
-import { useDailyStats } from "../hooks/useDailyStats";
+import { useDailyStats, useDayHistory } from "../hooks/useDailyStats";
 import type { DailyStatDay } from "../hooks/useDailyStats";
 
 const OPEN_STORAGE_KEY = "sessionQa.trackerOpen";
@@ -280,6 +288,201 @@ function AllDatesModal({
 }
 
 /* ------------------------------------------------------------------ */
+/* Day history                                                         */
+/* ------------------------------------------------------------------ */
+
+function DayHistoryModal({
+  date,
+  tz,
+  onClose,
+}: {
+  date: string;
+  tz?: string;
+  onClose: () => void;
+}) {
+  const { history, loading, error, refetch } = useDayHistory({ date, tz });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const label = parseDate(date).toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-900/40"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="day-history-title"
+        className="w-full max-w-lg max-h-[80vh] flex flex-col bg-white rounded-2xl shadow-xl border border-slate-200"
+        style={{ fontFamily: FONT_UI }}
+      >
+        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-slate-100">
+          <div>
+            <h2
+              id="day-history-title"
+              className="text-[15px] font-semibold text-slate-900"
+              style={{ fontFamily: FONT_DISPLAY }}
+            >
+              {label}
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              How this day's total was calculated
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="cursor-pointer p-1.5 -mr-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto">
+          {!history && loading && (
+            <p className="px-5 py-6 text-sm text-slate-400">Loading…</p>
+          )}
+          {!history && error && (
+            <p className="px-5 py-6 text-sm text-slate-500">
+              Couldn't load history.{" "}
+              <button
+                type="button"
+                onClick={() => refetch()}
+                className="font-medium text-blue-600 hover:text-blue-700 underline underline-offset-2"
+              >
+                Retry
+              </button>
+            </p>
+          )}
+
+          {history && (
+            <div className="px-5 py-4 space-y-4">
+              {/* Breakdown */}
+              <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
+                <div className="flex items-baseline justify-between gap-3 text-sm">
+                  <span className="text-slate-600">
+                    Auto-submitted ({history.submissions.length}{" "}
+                    {history.submissions.length === 1 ? "session" : "sessions"})
+                  </span>
+                  <span
+                    className="font-semibold text-slate-900"
+                    style={{ fontFamily: FONT_DATA }}
+                  >
+                    {history.autoCount}
+                  </span>
+                </div>
+                {history.added !== 0 && (
+                  <div className="flex items-baseline justify-between gap-3 text-sm mt-1.5">
+                    <span className="text-slate-600">Manual adjustment</span>
+                    <span
+                      className={`font-semibold ${
+                        history.added > 0
+                          ? "text-emerald-700"
+                          : "text-amber-700"
+                      }`}
+                      style={{ fontFamily: FONT_DATA }}
+                    >
+                      {signed(history.added)}
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-baseline justify-between gap-3 text-sm mt-2 pt-2 border-t border-slate-200">
+                  <span className="font-medium text-slate-800">
+                    Final total
+                  </span>
+                  <span
+                    className="text-lg font-semibold text-slate-900"
+                    style={{ fontFamily: FONT_DATA }}
+                  >
+                    {history.finalCount}
+                  </span>
+                </div>
+              </div>
+
+              {/* Individual submissions */}
+              <div>
+                <h3 className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                  Submissions
+                </h3>
+                {history.submissions.length === 0 ? (
+                  <p className="text-sm text-slate-400 italic py-2">
+                    No individual submissions recorded for this day.
+                    {history.finalCount > 0 && (
+                      <> The total comes entirely from manual adjustment.</>
+                    )}
+                  </p>
+                ) : (
+                  <ul className="border border-slate-200 rounded-lg divide-y divide-slate-100">
+                    {history.submissions.map((s) => (
+                      <li key={s.sessionId} className="px-3 py-2.5">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm text-slate-800 truncate">
+                              {s.email || "(unknown email)"}
+                            </p>
+                            <p className="text-xs text-slate-500 truncate">
+                              {s.task || "—"}
+                              {s.minutes ? ` · ${s.minutes} min` : ""}
+                            </p>
+                            <p
+                              className="text-[10.5px] text-slate-400 mt-0.5 truncate"
+                              style={{ fontFamily: FONT_DATA }}
+                            >
+                              {s.sessionId}
+                            </p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p
+                              className="text-[11px] text-slate-500"
+                              style={{ fontFamily: FONT_DATA }}
+                            >
+                              {new Date(s.completedAt).toLocaleTimeString(
+                                undefined,
+                                { hour: "2-digit", minute: "2-digit" },
+                              )}
+                            </p>
+                            {s.source && (
+                              <p className="text-[10px] text-slate-400 mt-0.5">
+                                {s.source}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <p className="text-[11px] text-slate-400">
+                Times shown in your local timezone · day boundary uses{" "}
+                {history.timezone}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Tracker                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -292,6 +495,7 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
 
   const [open, setOpen] = useState<boolean>(loadOpen);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyDate, setHistoryDate] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   // null = not editing, show the saved value
   const [draft, setDraft] = useState<string | null>(null);
@@ -508,6 +712,15 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
                       Today
                     </span>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => activeDate && setHistoryDate(activeDate)}
+                    title="See how this total was calculated"
+                    className="ml-auto cursor-pointer inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-50 px-2 py-1 rounded"
+                  >
+                    <History size={13} />
+                    History
+                  </button>
                 </div>
 
                 <label
@@ -594,7 +807,10 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
                       <button
                         key={day.date}
                         type="button"
-                        onClick={() => selectDay(day.date)}
+                        onClick={() => {
+                          selectDay(day.date);
+                          setHistoryDate(day.date);
+                        }}
                         aria-pressed={isSelected}
                         aria-label={`${full}: ${day.count} footage QC'd${
                           added !== 0 ? `, ${signed(added)} added manually` : ""
@@ -688,6 +904,14 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
             setHistoryOpen(false);
             if (changed) refetch();
           }}
+        />
+      )}
+
+      {historyDate && (
+        <DayHistoryModal
+          date={historyDate}
+          tz={tz}
+          onClose={() => setHistoryDate(null)}
         />
       )}
     </section>

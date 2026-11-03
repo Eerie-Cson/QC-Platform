@@ -16,6 +16,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Lock,
+  Clock,
+  XCircle,
+  CircleCheck,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
@@ -210,6 +213,55 @@ const OTHER_DROPDOWN_STYLES: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Quick-advance map — plain keys (no modifiers), skipped when an editable
+// control has focus. 1-6 → video quality, q/w/e → session details.
+// ---------------------------------------------------------------------------
+const QUICK_FIELD_MAP: Record<string, keyof Ratings> = {
+  Digit1: "lighting",
+  Digit2: "sharpness",
+  Digit3: "handVisibility",
+  Digit4: "fovFraming",
+  Digit5: "cameraAngle",
+  Digit6: "idle",
+  Numpad1: "lighting",
+  Numpad2: "sharpness",
+  Numpad3: "handVisibility",
+  Numpad4: "fovFraming",
+  Numpad5: "cameraAngle",
+  Numpad6: "idle",
+  KeyQ: "seated",
+  KeyW: "environment",
+  KeyE: "other",
+};
+
+function isEditableFocused(): boolean {
+  const el = document.activeElement as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (el.isContentEditable) return true;
+  return false;
+}
+
+function advanceField(
+  rating: Ratings,
+  key: keyof Ratings,
+  options: string[],
+): string | undefined {
+  const current = rating[key];
+  if (!current) return options[0];
+  const idx = options.indexOf(current as string);
+  return idx === options.length - 1 ? "" : options[idx + 1];
+}
+
+function getFieldOptions(key: keyof Ratings): string[] {
+  if (key === "seated") return SEATED_OPTIONS;
+  if (key === "environment") return ENVIRONMENT_OPTIONS;
+  if (key === "other") return OTHER_OPTIONS;
+  return SEVERITY_OPTIONS;
+}
+
+// ---------------------------------------------------------------------------
 // RatingModal
 // ---------------------------------------------------------------------------
 interface RatingModalProps {
@@ -222,6 +274,7 @@ interface RatingModalProps {
     faceVisible: boolean,
     isDraft?: boolean,
   ) => void;
+  onResolve?: (sessionId: string) => Promise<void> | void; // <-- NEW PROP
   mode: "review" | "crosscheck";
   readOnly?: boolean;
   autoNext: boolean;
@@ -238,6 +291,7 @@ export function RatingModal({
   initial,
   onClose,
   onSubmit,
+  onResolve, // <-- NEW PROP
   mode,
   readOnly = false,
   autoNext,
@@ -287,6 +341,9 @@ export function RatingModal({
   const [copiedSessionId, setCopiedSessionId] = useState(false);
   const [commentCopied, setCommentCopied] = useState(false);
 
+  // NEW STATE
+  const [isResolving, setIsResolving] = useState(false);
+
   const commentRef = useRef<HTMLTextAreaElement>(null);
   const crosscheckCommentRef = useRef<HTMLTextAreaElement>(null);
 
@@ -299,8 +356,8 @@ export function RatingModal({
   const crosscheckComment = rating.crosscheckComment || "";
   const isApproved = crosscheckComment === "Ok";
 
-  // The modal was opened on top of a previously-saved draft. Used purely
-  // for UI signalling: badge in the header, and the "Skip"→"Cancel" label.
+  // The modal was opened on top of a previously-saved draft. Used for
+  // the "Skip"→"Cancel" footer label logic.
   const isLoadedDraft = !isCrosscheck && (initial as any)?.isDraft === true;
 
   const isLinkMismatch = !row.link.endsWith(row.sessionId);
@@ -314,6 +371,25 @@ export function RatingModal({
   const progressTitle = allDone
     ? `All ${totalCount} sessions reviewed`
     : `${reviewedCount} reviewed · ${pendingCount} pending · ${Math.round(progressPct)}%`;
+
+  // NEW HANDLER
+  const handleResolve = async () => {
+    if (!onResolve || isResolving) return;
+    if (
+      !window.confirm("Are you sure you want to mark this session as resolved?")
+    )
+      return;
+
+    setIsResolving(true);
+    try {
+      await onResolve(row.sessionId);
+    } catch (error) {
+      console.error("Failed to resolve:", error);
+      alert("Failed to mark session as resolved. Please try again.");
+    } finally {
+      setIsResolving(false);
+    }
+  };
 
   // Auto-show comment box if there's a non-"Ok" custom comment
   useEffect(() => {
@@ -512,6 +588,90 @@ export function RatingModal({
 
   const complete = isRatingComplete(rating);
 
+  // True only when nothing meaningful has been touched yet:
+  // all rating fields at their defaults, no manual comment edit,
+  // faces-visible untouched. Used to pick Skip vs Save draft.
+  const isAtDefaultState =
+    !commentManuallyEdited &&
+    faceVisible === (row.faceVisible ?? false) &&
+    rating.lighting === Severity.NoIssue &&
+    rating.sharpness === Severity.NoIssue &&
+    rating.handVisibility === Severity.NoIssue &&
+    rating.fovFraming === Severity.NoIssue &&
+    rating.cameraAngle === Severity.NoIssue &&
+    rating.idle === Severity.NoIssue &&
+    rating.seated === Seated.StandingMoving &&
+    rating.environment === Environment.CorrectTask &&
+    rating.other === Severity.NoIssue &&
+    !rating.slowLoading;
+
+  // ---- Review status badge ----
+  const statusBadge = (() => {
+    // 1. Server-side states always take precedence
+    if (row.submitted === true) {
+      return {
+        label: "Submitted",
+        icon: <Check size={10} />,
+        cls: "text-emerald-700 bg-emerald-50 border border-emerald-200",
+        title: "This session has been submitted",
+      };
+    }
+    if (row.submitted === false && row.resolved === true) {
+      return {
+        label: "Resolved",
+        icon: <CircleCheck size={10} />,
+        cls: "text-slate-600 bg-slate-100 border border-slate-200",
+        title: "This failed session has been marked resolved",
+      };
+    }
+    if (row.submitted === false) {
+      return {
+        label: "Failed",
+        icon: <XCircle size={10} />,
+        cls: "text-rose-700 bg-rose-50 border border-rose-200",
+        title: "This session failed and has not been resolved",
+      };
+    }
+
+    // 2. Local draft state
+    const isDraft = (initial as any)?.isDraft === true;
+    if (isDraft) {
+      return {
+        label: "Draft",
+        icon: <Edit3 size={10} />,
+        cls: "text-amber-700 bg-amber-50 border border-amber-200",
+        title: "This session was loaded from a saved draft",
+      };
+    }
+
+    // 3. Unclaimed session states
+    // If there is no initial saved rating and the form is untouched, it's Pending.
+    if (!initial && isAtDefaultState) {
+      return {
+        label: "Pending",
+        icon: <Clock size={10} />,
+        cls: "text-slate-500 bg-slate-50 border border-slate-200",
+        title: "This session has not been reviewed yet",
+      };
+    }
+
+    if (isRatingComplete(rating)) {
+      return {
+        label: "Reviewed",
+        icon: <CheckCheck size={10} />,
+        cls: "text-teal-700 bg-teal-50 border border-teal-200",
+        title: "This session is fully rated and ready to submit",
+      };
+    }
+
+    return {
+      label: "In progress",
+      icon: <Clock size={10} />,
+      cls: "text-blue-700 bg-blue-50 border border-blue-200",
+      title: "This session is partially rated",
+    };
+  })();
+
   useEffect(() => {
     if (isCrosscheck || readOnly) return;
 
@@ -631,13 +791,29 @@ export function RatingModal({
     onSubmit(rating, systemRating, faceVisible, isDraft);
   };
 
+  // ─── SKIP LOGIC ──────────────────────────────────────────────────────────
+  // The Skip button now passes an empty rating to onSubmit. This triggers the
+  // parent's post-submission flow (navigate to next + open link) while leaving
+  // the session completely untouched on the server (stays Pending).
+  const handleSkip = () => {
+    if (readOnly) return;
+    onSubmit(
+      {} as Ratings,
+      row.systemRating || "",
+      row.faceVisible ?? false,
+      false,
+    );
+  };
+
   // Alt+S and the "Save draft / Skip / Cancel" button both route here.
-  //   – Draft loaded + rating complete → Cancel (discard edits, close)
-  //   – Anything else                  → save as draft (existing behaviour)
   const handleSkipOrCancel = () => {
     if (readOnly) return;
     if (isLoadedDraft && complete) {
       onClose();
+      return;
+    }
+    if (isAtDefaultState) {
+      handleSkip();
       return;
     }
     handleSubmitClick(true);
@@ -664,6 +840,8 @@ export function RatingModal({
     readOnly,
     hasPrev,
     hasNext,
+    autoNext,
+    setAutoNext,
     update,
     handleSetAllNoIssue,
     handleClearRating,
@@ -687,6 +865,8 @@ export function RatingModal({
       readOnly,
       hasPrev,
       hasNext,
+      autoNext,
+      setAutoNext,
       update,
       handleSetAllNoIssue,
       handleClearRating,
@@ -719,6 +899,34 @@ export function RatingModal({
       // Block all other shortcuts if a dialog is open
       if (s.showOrientationDialog || s.showMidciDialog) return;
 
+      // ─── Plain-key shortcuts (no modifiers) ───────────────────────────
+      if (
+        !s.readOnly &&
+        !e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        !isEditableFocused()
+      ) {
+        const quickKey = QUICK_FIELD_MAP[e.code];
+        if (quickKey) {
+          e.preventDefault();
+          const opts = getFieldOptions(quickKey);
+          s.update(quickKey, advanceField(s.rating, quickKey, opts) as any);
+          return;
+        }
+        if (e.code === "KeyF") {
+          e.preventDefault();
+          s.handleFaceVisibleChange(!s.faceVisible);
+          return;
+        }
+        if (e.code === "KeyN") {
+          e.preventDefault();
+          s.setAutoNext(!s.autoNext);
+          return;
+        }
+      }
+
       // Submit shortcuts
       const isSubmitShortcut =
         ((e.ctrlKey || e.metaKey) && e.key === "Enter") ||
@@ -742,77 +950,31 @@ export function RatingModal({
         return;
       }
 
-      // Preset Scenarios: Alt + Shift + 1/2/3
-      if (e.altKey && e.shiftKey && e.code.startsWith("Digit")) {
-        if (s.readOnly) return;
-        if (e.code === "Digit1") {
+      // Other Alt Shortcuts
+      if (e.altKey && !s.readOnly) {
+        // ─── Preset Scenarios ───────────────────────────────────────────
+        // Supports Alt + 1/2/3, Alt + Shift + 1/2/3, and Numpad equivalents
+        if (e.code === "Digit1" || e.code === "Numpad1") {
           e.preventDefault();
           s.handlePresetScenario(
             "Major Other Issue - Any task performed in residential area will be treated as fraud.",
           );
           return;
-        } else if (e.code === "Digit2") {
+        } else if (e.code === "Digit2" || e.code === "Numpad2") {
           e.preventDefault();
           s.handlePresetScenario(
             "Major Other Issue - Camera setup that are non-head mounted will be treated as fraud",
           );
           return;
-        } else if (e.code === "Digit3") {
+        } else if (e.code === "Digit3" || e.code === "Numpad3") {
           e.preventDefault();
           s.handlePresetScenario(
             "Major Other Issue - An object or the part of the object is extremely close to the camera lens, obstructing a portion of the frame will be flagged as fraud.",
           );
           return;
         }
-      }
 
-      // Field toggles: Alt+1-9 (existing) OR Ctrl/Cmd+Shift+1-9 (new).
-      if (
-        (e.altKey || ((e.ctrlKey || e.metaKey) && e.shiftKey)) &&
-        e.code.startsWith("Digit") &&
-        !s.readOnly
-      ) {
-        const num = e.code.replace("Digit", "");
-        const fieldMap: Record<
-          string,
-          { key: keyof Ratings; options: string[] }
-        > = {
-          "1": { key: "lighting", options: SEVERITY_OPTIONS },
-          "2": { key: "sharpness", options: SEVERITY_OPTIONS },
-          "3": { key: "handVisibility", options: SEVERITY_OPTIONS },
-          "4": { key: "fovFraming", options: SEVERITY_OPTIONS },
-          "5": { key: "cameraAngle", options: SEVERITY_OPTIONS },
-          "6": { key: "idle", options: SEVERITY_OPTIONS },
-          "7": { key: "seated", options: SEATED_OPTIONS },
-          "8": { key: "environment", options: ENVIRONMENT_OPTIONS },
-          "9": { key: "other", options: OTHER_OPTIONS },
-        };
-
-        const mapping = fieldMap[num];
-        if (mapping) {
-          e.preventDefault();
-          const currentValue = s.rating[mapping.key];
-          const options = mapping.options;
-          let nextValue;
-
-          if (!currentValue) {
-            nextValue = options[0];
-          } else {
-            const idx = options.indexOf(currentValue as string);
-            if (idx === options.length - 1) {
-              nextValue = "";
-            } else {
-              nextValue = options[idx + 1];
-            }
-          }
-
-          s.update(mapping.key, nextValue as any);
-        }
-        return;
-      }
-
-      // Other Alt Shortcuts
-      if (e.altKey && !s.readOnly) {
+        // ─── Navigation & Bulk Actions ──────────────────────────────────
         if (e.code === "ArrowLeft") {
           e.preventDefault();
           if (s.hasPrev) s.onNavigate("prev");
@@ -825,9 +987,6 @@ export function RatingModal({
         } else if (e.code === "KeyC") {
           e.preventDefault();
           s.handleClearRating();
-        } else if (e.code === "KeyF") {
-          e.preventDefault();
-          s.handleFaceVisibleChange(!s.faceVisible);
         } else if (e.code === "KeyL") {
           e.preventDefault();
           s.update("slowLoading", !s.rating.slowLoading);
@@ -940,20 +1099,23 @@ export function RatingModal({
       return {
         label: "Cancel",
         title: "Discard changes and close (Alt+S)",
-        handler: handleSkipOrCancel,
+        handler: onClose,
       };
     }
-    if (complete) {
+    // Default state (all No issue, comment untouched) → nothing to save → Skip
+    if (isAtDefaultState) {
       return {
         label: "Skip",
         title: "Skip this session without submitting (Alt+S)",
-        handler: handleSkipOrCancel,
+        handler: handleSkip,
       };
     }
+    // Anything else (rating changed, comment edited, faces toggled,
+    // slow-loading on, incomplete fields, etc.) → there is work worth saving
     return {
       label: "Save draft",
       title: "Save progress without submitting (Alt+S)",
-      handler: handleSkipOrCancel,
+      handler: () => handleSubmitClick(true),
     };
   })();
 
@@ -984,12 +1146,12 @@ export function RatingModal({
               >
                 {row.task}
               </h2>
-              {isLoadedDraft && (
+              {statusBadge && (
                 <span
-                  className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wider text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shrink-0"
-                  title="This session was loaded from a saved draft"
+                  className={`inline-flex items-center gap-1 text-[10px] font-semibold tracking-wider px-1.5 py-0.5 rounded shrink-0 ${statusBadge.cls}`}
+                  title={statusBadge.title}
                 >
-                  <Edit3 size={10} /> Draft
+                  {statusBadge.icon} {statusBadge.label}
                 </span>
               )}
               {row.new && (
@@ -1155,7 +1317,7 @@ export function RatingModal({
                         tone="severity"
                         disabled={readOnly}
                         compact
-                        title={`Toggle ${f.label} (Alt+${shortcutNum} or Ctrl+Shift+${shortcutNum})`}
+                        title={`Toggle ${f.label} — press ${shortcutNum}`}
                       />
                     );
                   })}
@@ -1175,7 +1337,7 @@ export function RatingModal({
                     styleMap={SEATED_STYLE_MAP}
                     disabled={readOnly}
                     compact
-                    title="Toggle Seated (Alt+7 or Ctrl+Shift+7)"
+                    title="Toggle Seated — press Q"
                   />
 
                   <SegmentedField<Environment>
@@ -1186,7 +1348,7 @@ export function RatingModal({
                     styleMap={ENVIRONMENT_STYLE_MAP}
                     disabled={readOnly}
                     compact
-                    title="Toggle Environment (Alt+8 or Ctrl+Shift+8)"
+                    title="Toggle Environment — press W"
                   />
 
                   <div className="sm:col-span-2">
@@ -1198,7 +1360,7 @@ export function RatingModal({
                       tone="severity"
                       disabled={readOnly}
                       compact
-                      title="Toggle Other (Alt+9 or Ctrl+Shift+9). Presets: Alt+Shift+1 (Residential), Alt+Shift+2 (Non-head mounted), Alt+Shift+3 (Object close)"
+                      title="Toggle Other — press E. Presets: Alt+1 (Residential), Alt+2 (Non-head mounted), Alt+3 (Object close)"
                     />
                   </div>
                 </div>
@@ -1264,7 +1426,7 @@ export function RatingModal({
                   </label>
                   <label
                     htmlFor="faceVisible"
-                    title="Toggle Faces visible (Alt+F)"
+                    title="Toggle Faces visible (F)"
                     className={`inline-flex items-center gap-2 text-sm text-slate-600 select-none ${
                       readOnly ? "opacity-60" : "cursor-pointer"
                     }`}
@@ -1631,7 +1793,7 @@ export function RatingModal({
                 role="switch"
                 aria-checked={autoNext}
                 onClick={() => setAutoNext(!autoNext)}
-                title="After you submit, open the next unrated session automatically"
+                title="Toggle auto-next (N)"
                 className={`inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900 rounded-md ${FOCUS_RING}`}
               >
                 <span
@@ -1651,6 +1813,19 @@ export function RatingModal({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* NEW: Mark as Resolved Button */}
+            {row.submitted === false && row.resolved !== true && onResolve && (
+              <button
+                onClick={handleResolve}
+                disabled={isResolving}
+                className={`${BTN_GHOST} text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50`}
+                title="Mark this failed session as resolved"
+              >
+                <CircleCheck size={14} className="inline mr-1.5" />
+                {isResolving ? "Resolving..." : "Mark as Resolved"}
+              </button>
+            )}
+
             {readOnly ? (
               <button onClick={onClose} className={BTN_PRIMARY}>
                 Close

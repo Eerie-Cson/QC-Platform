@@ -18,6 +18,7 @@ import {
   Terminal,
   Eye,
   RotateCcw,
+  RefreshCw,
   ArrowUpDown,
   MoreHorizontal,
 } from "lucide-react";
@@ -80,6 +81,15 @@ function getReason(row: SessionRow): string {
   return ((row as any).reason as string) || "Unknown error";
 }
 
+function isNewAccountFailure(row: SessionRow): boolean {
+  return (
+    row.submitted === false &&
+    row.new === true &&
+    row.resolved !== true &&
+    ((row as any).reason as string) === "Skipped: New account"
+  );
+}
+
 export function SessionReviewDashboard() {
   const {
     filteredRows,
@@ -89,6 +99,7 @@ export function SessionReviewDashboard() {
     submitRating,
     updateReason,
     toggleResolved,
+    requeueSession,
     exportCSV,
     filters,
     setFilters,
@@ -233,6 +244,16 @@ export function SessionReviewDashboard() {
     }
   };
 
+  // ── NEW: move a failed new-account session back to draft / Pending ──
+  const handleResubmit = async (row: SessionRow) => {
+    const result = await requeueSession(row.sessionId);
+    if (result.success) {
+      showToast(`Moved ${row.email} back to draft`);
+    } else {
+      showToast(result.error || "Failed to requeue session");
+    }
+  };
+
   // --- NEW: Wrapper for resolving directly inside the RatingModal ---
   const handleModalResolve = async (sessionId: string) => {
     const rowToResolve = rows.find((r) => r.sessionId === sessionId);
@@ -264,6 +285,12 @@ export function SessionReviewDashboard() {
   const allResolvableSelected =
     resolvableRows.length > 0 && selectedRows.length === resolvableRows.length;
 
+  // ── NEW: sessions that failed specifically because they're new accounts ──
+  const newAccountFailures = filteredRows.filter(isNewAccountFailure);
+  const selectedNewAccountFailures = newAccountFailures.filter((r) =>
+    selectedIds.has(r.sessionId),
+  );
+
   const toggleSelected = (id: string) =>
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -289,6 +316,22 @@ export function SessionReviewDashboard() {
       ok === targets.length
         ? `Marked ${ok} ${ok === 1 ? "session" : "sessions"} as resolved`
         : `Resolved ${ok} of ${targets.length} · some failed`,
+    );
+    setSelectedIds(new Set());
+  };
+
+  // ── NEW: bulk requeue new-account failures ──
+  const handleBulkResubmit = async () => {
+    const targets = selectedNewAccountFailures;
+    if (targets.length === 0) return;
+    const results = await Promise.all(
+      targets.map((r) => requeueSession(r.sessionId)),
+    );
+    const ok = results.filter((r) => r.success).length;
+    showToast(
+      ok === targets.length
+        ? `Moved ${ok} ${ok === 1 ? "session" : "sessions"} back to draft`
+        : `Requeued ${ok} of ${targets.length} · some failed`,
     );
     setSelectedIds(new Set());
   };
@@ -692,6 +735,18 @@ export function SessionReviewDashboard() {
               <span className="font-medium">
                 {selectedRows.length} selected
               </span>
+
+              {selectedNewAccountFailures.length > 0 && (
+                <button
+                  onClick={handleBulkResubmit}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors cursor-pointer"
+                  title="Move the selected new-account failures back to draft so they can be re-rated and re-submitted"
+                >
+                  <RefreshCw size={13} /> Resubmit{" "}
+                  {selectedNewAccountFailures.length}
+                </button>
+              )}
+
               <button
                 onClick={handleBulkResolve}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-600 text-white hover:bg-sky-700 transition-colors cursor-pointer"
@@ -771,6 +826,7 @@ export function SessionReviewDashboard() {
                   rating !== undefined && !isRatingEmpty(rating);
                 const isButtonDone = isSubmitted || isRated;
                 const isHighlighted = reviewingRowId === row.sessionId;
+                const canResubmit = isNewAccountFailure(row);
 
                 return (
                   <tr
@@ -879,6 +935,8 @@ export function SessionReviewDashboard() {
                           <>
                             <RowActionsMenu
                               isResolved={isResolved}
+                              canResubmit={canResubmit}
+                              onResubmit={() => handleResubmit(row)}
                               onEditReason={() => setCommentRow(row)}
                               onToggleResolved={() =>
                                 handleToggleResolved(row, !isResolved)
@@ -988,6 +1046,7 @@ export function SessionReviewDashboard() {
             const hasRating = rating !== undefined && !isRatingEmpty(rating);
             const isButtonDone = isSubmitted || isRated;
             const isHighlighted = reviewingRowId === row.sessionId;
+            const canResubmit = isNewAccountFailure(row);
 
             return (
               <div
@@ -1014,10 +1073,10 @@ export function SessionReviewDashboard() {
                       <p className="text-slate-500 text-sm">{row.task}</p>
                       {row.new && (
                         <span
-                          className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded"
+                          className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded"
                           title="This session comes from a newly-created account"
                         >
-                          <UserPlus size={10} /> New
+                          <UserPlus size={10} /> New account
                         </span>
                       )}
                       {row.duplicate && (
@@ -1096,6 +1155,8 @@ export function SessionReviewDashboard() {
                     <>
                       <RowActionsMenu
                         isResolved={isResolved}
+                        canResubmit={canResubmit}
+                        onResubmit={() => handleResubmit(row)}
                         onEditReason={() => setCommentRow(row)}
                         onToggleResolved={() =>
                           handleToggleResolved(row, !isResolved)
@@ -1201,7 +1262,7 @@ export function SessionReviewDashboard() {
             setReviewingRowId(null);
           }}
           onSubmit={handleSubmitRating}
-          onResolve={handleModalResolve} // <-- CONNECTED HERE
+          onResolve={handleModalResolve}
           mode="review"
           readOnly={activeRow.submitted === false}
           autoNext={autoNext}
@@ -1239,10 +1300,14 @@ export function SessionReviewDashboard() {
 
 function RowActionsMenu({
   isResolved,
+  canResubmit = false,
+  onResubmit,
   onEditReason,
   onToggleResolved,
 }: {
   isResolved: boolean;
+  canResubmit?: boolean;
+  onResubmit?: () => void;
   onEditReason: () => void;
   onToggleResolved: () => void;
 }) {
@@ -1264,7 +1329,7 @@ function RowActionsMenu({
     if (!rect) return;
     const right = window.innerWidth - rect.right;
     setPos(
-      rect.bottom + 110 > window.innerHeight
+      rect.bottom + 130 > window.innerHeight
         ? { bottom: window.innerHeight - rect.top + 6, right }
         : { top: rect.bottom + 6, right },
     );
@@ -1326,10 +1391,25 @@ function RowActionsMenu({
               }}
               className="z-[71] w-48 rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
             >
+              {canResubmit && onResubmit && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  autoFocus
+                  onClick={() => {
+                    close();
+                    onResubmit();
+                  }}
+                  className={itemClass}
+                  title="Move back to draft / Pending so it can be re-rated and re-submitted"
+                >
+                  <RefreshCw size={14} className="text-slate-400" /> Resubmit
+                </button>
+              )}
               <button
                 type="button"
                 role="menuitem"
-                autoFocus
+                autoFocus={!canResubmit}
                 onClick={() => {
                   close();
                   onEditReason();
@@ -1550,6 +1630,7 @@ function RunAutoRaterButton({
   const [logs, setLogs] = useState("");
   const [starting, setStarting] = useState(false);
   const [limit, setLimit] = useState<string>("");
+  const [allowNewAccounts, setAllowNewAccounts] = useState(false);
   const pollRef = useRef<number | null>(null);
 
   const poll = useCallback(async () => {
@@ -1603,7 +1684,7 @@ function RunAutoRaterButton({
       );
       onToast?.("Lost connection to auto-rater status endpoint");
     }
-  }, [onComplete, onToast, logs, onProgress]); // Added onProgress to deps
+  }, [onComplete, onToast, logs, onProgress]);
 
   const startPolling = useCallback(() => {
     if (pollRef.current) window.clearInterval(pollRef.current);
@@ -1655,6 +1736,7 @@ function RunAutoRaterButton({
         body: JSON.stringify({
           limit:
             isNaN(parsedLimit) || parsedLimit <= 0 ? undefined : parsedLimit,
+          allowNewAccounts,
         }),
       });
       if (res.status === 409) {
@@ -1729,6 +1811,26 @@ function RunAutoRaterButton({
             className="w-[60px] bg-transparent text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none disabled:opacity-50"
           />
         </div>
+
+        {/* ── Allow new-account sessions to be submitted this run ── */}
+        <label
+          title="Include sessions from newly-created accounts. Use this to retry sessions previously skipped with 'Skipped: New account'."
+          className={`flex items-center gap-1.5 bg-slate-50 border-r border-slate-200 px-2.5 text-xs font-medium text-slate-600 select-none transition-colors ${
+            disabled || running
+              ? "opacity-60 cursor-not-allowed"
+              : "cursor-pointer hover:bg-slate-100"
+          }`}
+        >
+          <input
+            type="checkbox"
+            checked={allowNewAccounts}
+            onChange={(e) => setAllowNewAccounts(e.target.checked)}
+            disabled={disabled || running}
+            className="w-3.5 h-3.5 cursor-pointer rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+          />
+          <span className="whitespace-nowrap">Allow new</span>
+        </label>
+
         <button
           onClick={start}
           disabled={disabled}

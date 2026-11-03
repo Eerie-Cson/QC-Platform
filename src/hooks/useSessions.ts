@@ -285,6 +285,53 @@ export function useSessions({
     [],
   );
 
+  /**
+   * Requeue a failed new-account session back to draft / Pending state.
+   * Only the server permits this for sessions skipped with
+   * reason === "Skipped: New account" that are not resolved.
+   *
+   * Note: unlike toggleResolved, we explicitly reset the failure markers
+   * here because `{...row, ...session}` would otherwise keep the old
+   * `submitted` / `reason` values from the pre-requeue row.
+   */
+  const requeueSession = useCallback(async (sessionId: string) => {
+    try {
+      const res = await fetch(
+        `http://localhost:5000/api/sessions/${sessionId}/requeue`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || "Failed to requeue session");
+      }
+      const data = await res.json();
+      if (data.session) {
+        setRows((prevRows) =>
+          prevRows.map((row) =>
+            row.sessionId === data.session.sessionId
+              ? ({
+                  ...row,
+                  ...data.session,
+                  submitted: undefined,
+                  submittedAt: undefined,
+                  reason: undefined,
+                } as SessionRow)
+              : row,
+          ),
+        );
+      }
+      return { success: true };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : "Unknown error",
+      };
+    }
+  }, []);
+
   const exportCSV = useCallback(async () => {
     try {
       const res = await fetch(`http://localhost:5000${exportEndpoint}`);
@@ -337,6 +384,7 @@ export function useSessions({
     submitRating,
     updateReason,
     toggleResolved,
+    requeueSession, // ← NEW
     exportCSV,
     refetch: fetchSessions,
   };

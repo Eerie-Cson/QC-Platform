@@ -20,7 +20,7 @@ import {
   XCircle,
   CircleCheck,
 } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 import {
   SessionRow,
@@ -54,6 +54,7 @@ import {
   toggleStrikethrough,
   isRatingEmpty,
 } from "../utilities/utils";
+import { useDailyStats } from "../hooks/useDailyStats";
 
 // ---------------------------------------------------------------------------
 // Small shared pieces
@@ -116,6 +117,208 @@ function ConfirmDialog({
         <p className="text-sm text-slate-600 mt-2">{children}</p>
         <div className="flex justify-end gap-2 mt-6">{actions}</div>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// "Submitted today" corner badge — Merged Design
+//
+//  - Visuals from the attached code: Blue circle, white border, shadow, hover scale.
+//  - Behavior from previous: Collapsed shows the number, Expanded shows
+//    "number submitted today ✓".
+// ---------------------------------------------------------------------------
+const TODAY_COLLAPSED_KEY = "ratingModal.todayBadgeCollapsed";
+const BADGE_D = 36; // circle diameter (px)
+const BADGE_PILL_W = 172; // total width when expanded
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(TODAY_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Detects the count going up and flags it for a short celebration. */
+function useCountFlash(count: number | undefined) {
+  const [celebrating, setCelebrating] = useState(false);
+  const [delta, setDelta] = useState(0);
+  const prev = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (count === undefined) return;
+    const before = prev.current;
+    prev.current = count;
+    if (before === undefined || count <= before) return;
+
+    setDelta(count - before);
+    setCelebrating(true);
+    const t = window.setTimeout(() => setCelebrating(false), 2200);
+    return () => window.clearTimeout(t);
+  }, [count]);
+
+  return { celebrating, delta };
+}
+
+function AnimatedCount({
+  value,
+  className,
+  reduceMotion,
+  spring,
+}: {
+  value: number;
+  className: string;
+  reduceMotion: boolean | null;
+  spring: object;
+}) {
+  return (
+    <span className="relative inline-flex overflow-hidden items-center">
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.span
+          key={value}
+          initial={reduceMotion ? false : { y: 14, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={reduceMotion ? undefined : { y: -14, opacity: 0 }}
+          transition={spring}
+          className={`tabular-nums leading-none ${className}`}
+          style={{ fontFamily: FONT_DATA }}
+        >
+          {value}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  );
+}
+
+function TodaySubmittedBadge({ dailyGoal }: { dailyGoal?: number }) {
+  const { stats } = useDailyStats({ days: 14, autoRefreshMs: 60_000 });
+  const reduceMotion = useReducedMotion();
+
+  const count = stats?.today;
+  const isLoading = count === undefined;
+  const { celebrating, delta } = useCountFlash(count);
+
+  const [collapsed, setCollapsed] = useState<boolean>(readCollapsed);
+  const toggle = () => {
+    setCollapsed((c) => {
+      const next = !c;
+      try {
+        localStorage.setItem(TODAY_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        /* storage unavailable – ignore */
+      }
+      return next;
+    });
+  };
+
+  const hasGoal = !!dailyGoal && dailyGoal > 0;
+  const label = isLoading
+    ? "Submitted today: loading"
+    : hasGoal
+      ? `${count} of ${dailyGoal} submitted today`
+      : `${count} submitted today`;
+
+  const spring = reduceMotion
+    ? { duration: 0 }
+    : { type: "spring" as const, stiffness: 520, damping: 36 };
+
+  return (
+    // Zero-size anchor sitting on the modal's upper-left vertex
+    <div className="absolute top-0 left-4 sm:left-0 z-10 w-0 h-0">
+      <div className="group absolute" style={{ top: -12, left: -12 }}>
+        <motion.button
+          type="button"
+          onClick={toggle}
+          aria-expanded={!collapsed}
+          aria-label={`${label}. ${collapsed ? "Expand" : "Collapse"}`}
+          title={`${label} — click to ${collapsed ? "expand" : "collapse"}`}
+          initial={false}
+          animate={{ width: collapsed ? BADGE_D : BADGE_PILL_W }}
+          transition={spring}
+          style={{ fontFamily: FONT_UI, height: BADGE_D }}
+          className={`rounded-full border-[3px] border-white flex items-center text-white shadow-md select-none transition-[background-color,transform] duration-200 hover:scale-105 hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/50 focus-visible:ring-offset-2 overflow-hidden ${
+            celebrating ? "bg-emerald-600" : "bg-blue-600 hover:bg-blue-700"
+          }`}
+        >
+          {/* Left side: Circle Area */}
+          <span
+            className="cursor-pointer relative shrink-0 flex items-center justify-center h-full"
+            style={{ width: BADGE_D - 6 }}
+          >
+            {isLoading ? (
+              <span
+                aria-hidden
+                className="inline-block h-3 w-4 rounded bg-white/40 animate-pulse"
+              />
+            ) : (
+              <AnimatedCount
+                value={count}
+                reduceMotion={reduceMotion}
+                spring={spring}
+                className="text-[13px] font-bold text-white"
+              />
+            )}
+          </span>
+
+          {/* Right side: Expanded Label */}
+          <AnimatePresence initial={false}>
+            {!collapsed && (
+              <motion.span
+                key="label"
+                initial={{ opacity: 0, x: -6 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: reduceMotion ? 0 : 0.14 }}
+                className="flex items-center gap-2 pr-3 pl-1 whitespace-nowrap"
+              >
+                <span className="text-xs font-medium text-white/90">
+                  submitted today
+                </span>
+                <Check
+                  size={13}
+                  strokeWidth={3}
+                  className="text-white shrink-0"
+                  aria-hidden
+                />
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </motion.button>
+
+        {/* +N pop when a submission lands */}
+        <AnimatePresence>
+          {celebrating && delta > 0 && (
+            <motion.span
+              key="delta"
+              initial={{ opacity: 0, scale: 0.6, y: 4 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              transition={{ duration: reduceMotion ? 0 : 0.2 }}
+              className="absolute -top-2 -right-3 px-1.5 py-0.5 rounded-full bg-emerald-700 text-white text-[10px] font-semibold tabular-nums shadow-sm pointer-events-none"
+              style={{ fontFamily: FONT_DATA }}
+            >
+              +{delta}
+            </motion.span>
+          )}
+        </AnimatePresence>
+
+        {/* Hover tooltip (only visible when collapsed) */}
+        {collapsed && (
+          <span
+            role="tooltip"
+            className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs text-white opacity-0 translate-x-[-4px] transition-all duration-150 group-hover:opacity-100 group-hover:translate-x-0 z-50"
+            style={{ fontFamily: FONT_UI }}
+          >
+            {label}
+          </span>
+        )}
+      </div>
+
+      {/* Screen-reader announcement when a submission lands */}
+      <span className="sr-only" role="status" aria-live="polite">
+        {celebrating && !isLoading ? label : ""}
+      </span>
     </div>
   );
 }
@@ -972,6 +1175,12 @@ export function RatingModal({
             "Major Other Issue - An object or the part of the object is extremely close to the camera lens, obstructing a portion of the frame will be flagged as fraud.",
           );
           return;
+        } else if (e.code === "Digit4" || e.code === "Numpad4") {
+          e.preventDefault();
+          s.handlePresetScenario(
+            "Major Other Issue - a portion of the worker's face is visible to the camera more than 25% of the  time",
+          );
+          return;
         }
 
         // ─── Navigation & Bulk Actions ──────────────────────────────────
@@ -1132,11 +1341,15 @@ export function RatingModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="rating-modal-title"
-        className="w-full sm:max-w-2xl bg-white rounded-t-2xl sm:rounded-2xl shadow-xl max-h-[95vh] flex flex-col border border-slate-200 focus:outline-none"
+        className="relative w-full sm:max-w-2xl bg-white rounded-t-2xl sm:rounded-2xl shadow-xl max-h-[95vh] flex flex-col border border-slate-200 focus:outline-none"
         style={{ fontFamily: FONT_UI }}
       >
+        {/* Pass dailyGoal={40} (or your target) to show a progress bar */}
+        <TodaySubmittedBadge />
         {/* ───────── Header ───────── */}
-        <div className="px-6 py-4 border-b border-slate-100 flex flex-col gap-3">
+
+        {/* pt-8 (instead of py-4) leaves clearance under the corner badge */}
+        <div className="px-6 pt-8 pb-4 border-b border-slate-100 flex flex-col gap-3">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-2 flex-wrap min-w-0">
               <h2
@@ -1770,7 +1983,7 @@ export function RatingModal({
                       {reviewedCount}/{totalCount}
                     </span>
                     <span className="hidden sm:inline">
-                      {reviewedCount} of {totalCount} done
+                      {reviewedCount} of {totalCount} Reviewed
                     </span>
                   </>
                 )}

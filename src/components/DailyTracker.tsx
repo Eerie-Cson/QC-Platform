@@ -15,14 +15,14 @@ import type { DailyStatDay } from "../hooks/useDailyStats";
 
 const OPEN_STORAGE_KEY = "sessionQa.trackerOpen";
 const MAX_COUNT = 9999;
-const HISTORY_DAYS = 60; // days shown in "View all dates"
+const HISTORY_DAYS = 60;
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
+type EntryMode = "set" | "add";
 
 interface DailyTrackerProps {
   days?: number;
   tz?: string;
-  /** Bump after a rating save so the numbers refresh. */
   refreshKey?: number;
 }
 
@@ -34,7 +34,6 @@ function loadOpen(): boolean {
   }
 }
 
-// "YYYY-MM-DD" -> local Date (avoids the UTC off-by-one of new Date(iso))
 function parseDate(iso: string): Date {
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(y, m - 1, d);
@@ -52,7 +51,7 @@ function AddedBadge({ added }: { added: number }) {
   if (added === 0) return null;
   return (
     <span
-      className={`text-[10.5px] font-semibold leading-none px-1.5 py-1 rounded border ${
+      className={`text-[10px] font-semibold leading-none px-1.5 py-1 rounded border ${
         added > 0
           ? "text-emerald-700 bg-emerald-50 border-emerald-200"
           : "text-amber-700 bg-amber-50 border-amber-200"
@@ -61,6 +60,63 @@ function AddedBadge({ added }: { added: number }) {
     >
       {signed(added)}
     </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Segmented Set / Add toggle                                          */
+/* ------------------------------------------------------------------ */
+
+function ModeToggle({
+  mode,
+  onChange,
+  size = "md",
+}: {
+  mode: EntryMode;
+  onChange: (next: EntryMode) => void;
+  size?: "sm" | "md";
+}) {
+  const isSet = mode === "set";
+  const isCompact = size === "sm";
+
+  // Scaled down to match the h-8 input box
+  const baseBtn = isCompact
+    ? "h-[22px] px-2 rounded text-[10px] font-medium"
+    : "h-[26px] px-3 rounded text-[11px] font-medium";
+  const active = "bg-blue-50 text-blue-700 shadow-sm";
+  const idle = "text-slate-500 hover:text-slate-800";
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Entry mode"
+      className={`inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 ${
+        isCompact ? "h-7" : "h-8"
+      }`}
+    >
+      <button
+        type="button"
+        role="radio"
+        aria-checked={isSet}
+        onClick={() => onChange("set")}
+        className={`cursor-pointer transition-colors flex items-center justify-center ${baseBtn} ${
+          isSet ? active : idle
+        }`}
+      >
+        Set
+      </button>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={!isSet}
+        onClick={() => onChange("add")}
+        className={`cursor-pointer transition-colors flex items-center justify-center ${baseBtn} ${
+          !isSet ? active : idle
+        }`}
+      >
+        Add
+      </button>
+    </div>
   );
 }
 
@@ -78,13 +134,21 @@ function HistoryRow({
   onSave: (date: string, count: number) => Promise<boolean>;
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
+  const [mode, setMode] = useState<EntryMode>("set");
+  const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
 
-  const n = Number.parseInt(draft, 10);
-  const valid = Number.isFinite(n) && n >= 0 && n <= MAX_COUNT;
-  const canSave = valid && n !== day.count && !saving;
+  const isSetMode = mode === "set";
+  const shown = draft ?? (isSetMode ? String(day.count) : "");
+  const parsed = Number.parseInt(shown, 10);
+  const target = isSetMode
+    ? Number.isFinite(parsed)
+      ? parsed
+      : day.count
+    : day.count + (Number.isFinite(parsed) ? parsed : 0);
+  const valid = Number.isFinite(parsed) && parsed >= 0 && target <= MAX_COUNT;
+  const canSave = valid && target !== day.count && !saving;
 
   const label = parseDate(day.date).toLocaleDateString(undefined, {
     weekday: "short",
@@ -92,8 +156,28 @@ function HistoryRow({
     day: "numeric",
   });
 
+  const switchMode = (next: EntryMode) => {
+    if (next === mode) return;
+    setMode(next);
+    setDraft(null);
+    setFailed(false);
+  };
+
+  const step = (by: number) => {
+    let base = 0;
+    if (isSetMode) {
+      base = valid ? parsed : day.count;
+    } else {
+      base = valid ? parsed : 0;
+    }
+    const next = clampCount(base + by);
+    setDraft(next === 0 && !isSetMode ? "" : String(next));
+    setFailed(false);
+  };
+
   const start = () => {
-    setDraft(String(day.count));
+    setDraft(null);
+    setMode("set");
     setFailed(false);
     setEditing(true);
   };
@@ -102,10 +186,12 @@ function HistoryRow({
     e.preventDefault();
     if (!canSave) return;
     setSaving(true);
-    const ok = await onSave(day.date, n);
+    const ok = await onSave(day.date, target);
     setSaving(false);
-    if (ok) setEditing(false);
-    else setFailed(true);
+    if (ok) {
+      setEditing(false);
+      setDraft(null);
+    } else setFailed(true);
   };
 
   return (
@@ -122,37 +208,57 @@ function HistoryRow({
       {editing ? (
         <form
           onSubmit={submit}
-          className="flex-1 flex items-center justify-end gap-2"
+          className="flex-1 flex items-center justify-end gap-1.5"
         >
           {failed && (
             <span className="text-xs text-red-600">Couldn't save</span>
           )}
-          <input
-            type="number"
-            inputMode="numeric"
-            min={0}
-            max={MAX_COUNT}
-            value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              setFailed(false);
-            }}
-            aria-label={`Footage QC'd on ${label}`}
-            autoFocus
-            className="w-20 px-2 py-1.5 rounded-lg border border-slate-200 text-sm font-semibold text-slate-900 text-center focus:outline-none focus:ring-2 focus:ring-blue-600/30 focus:border-blue-400 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-            style={{ fontFamily: FONT_DATA }}
-          />
+          <div className="flex items-center h-7 rounded-lg border border-slate-200 bg-white px-0.5">
+            <button
+              type="button"
+              onClick={() => step(-1)}
+              disabled={isSetMode ? parsed <= 0 : !draft || parsed <= 0}
+              className="cursor-pointer p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-50 rounded disabled:opacity-30 disabled:hover:bg-transparent"
+            >
+              <Minus size={12} />
+            </button>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={MAX_COUNT}
+              value={shown}
+              placeholder={isSetMode ? undefined : "0"}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                setFailed(false);
+              }}
+              aria-label={`Footage QC'd on ${label}`}
+              autoFocus
+              className="w-10 h-full text-center text-xs font-semibold text-slate-900 bg-transparent focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              style={{ fontFamily: FONT_DATA }}
+            />
+            <button
+              type="button"
+              onClick={() => step(1)}
+              disabled={isSetMode ? parsed >= MAX_COUNT : target >= MAX_COUNT}
+              className="cursor-pointer p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-50 rounded disabled:opacity-30 disabled:hover:bg-transparent"
+            >
+              <Plus size={12} />
+            </button>
+          </div>
+          <ModeToggle mode={mode} onChange={switchMode} size="sm" />
           <button
             type="submit"
             disabled={!canSave}
-            className="cursor-pointer px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
+            className="cursor-pointer px-2.5 h-7 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
           >
             {saving ? "Saving…" : "Save"}
           </button>
           <button
             type="button"
             onClick={() => setEditing(false)}
-            className="cursor-pointer px-2 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+            className="cursor-pointer px-2 h-7 rounded-lg text-xs font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-50"
           >
             Cancel
           </button>
@@ -161,7 +267,7 @@ function HistoryRow({
         <>
           <div className="flex-1 flex items-center gap-2">
             <span
-              className={`text-base font-semibold ${
+              className={`text-sm font-semibold ${
                 day.count ? "text-slate-800" : "text-slate-300"
               }`}
               style={{ fontFamily: FONT_DATA }}
@@ -173,7 +279,7 @@ function HistoryRow({
           <button
             type="button"
             onClick={start}
-            className="cursor-pointer px-2.5 py-1.5 rounded-lg text-xs font-medium text-blue-600 hover:bg-blue-50"
+            className="cursor-pointer px-2.5 py-1 rounded-lg text-xs font-medium text-blue-600 hover:bg-blue-50"
           >
             Edit
           </button>
@@ -373,7 +479,6 @@ function DayHistoryModal({
 
           {history && (
             <div className="px-5 py-4 space-y-4">
-              {/* Breakdown */}
               <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
                 <div className="flex items-baseline justify-between gap-3 text-sm">
                   <span className="text-slate-600">
@@ -415,7 +520,6 @@ function DayHistoryModal({
                 </div>
               </div>
 
-              {/* Individual submissions */}
               <div>
                 <h3 className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
                   Submissions
@@ -497,7 +601,8 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyDate, setHistoryDate] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  // null = not editing, show the saved value
+
+  const [mode, setMode] = useState<EntryMode>("set");
   const [draft, setDraft] = useState<string | null>(null);
   const [status, setStatus] = useState<SaveStatus>("idle");
 
@@ -521,10 +626,9 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
       stats ? [...stats.days].sort((a, b) => a.date.localeCompare(b.date)) : [],
     [stats],
   );
-  const visible = series; // every day in the `days` range
+  const visible = series;
 
   const rangeTotal = visible.reduce((sum, d) => sum + d.count, 0);
-  // Average over days that actually had footage, so empty days don't drag it down.
   const activeDayCount = visible.filter((d) => d.count > 0).length;
   const avgPerActiveDay = activeDayCount
     ? Math.round(rangeTotal / activeDayCount)
@@ -537,10 +641,19 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
   const savedCount = activeDay?.count ?? 0;
   const savedAdded = activeDay?.added ?? 0;
 
-  const shown = draft ?? String(savedCount);
+  const isSetMode = mode === "set";
+  const shown = draft ?? (isSetMode ? String(savedCount) : "");
   const parsed = Number.parseInt(shown, 10);
-  const valid = Number.isFinite(parsed) && parsed >= 0 && parsed <= MAX_COUNT;
-  const delta = valid ? parsed - savedCount : 0;
+
+  const targetCount = isSetMode
+    ? Number.isFinite(parsed)
+      ? parsed
+      : savedCount
+    : savedCount + (Number.isFinite(parsed) ? parsed : 0);
+
+  const valid =
+    Number.isFinite(parsed) && parsed >= 0 && targetCount <= MAX_COUNT;
+  const delta = targetCount - savedCount;
   const canSave =
     activeDate !== null &&
     draft !== null &&
@@ -551,12 +664,26 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
   const selectDay = (date: string) => {
     setSelected(date);
     setDraft(null);
+    setMode("set");
+    setStatus("idle");
+  };
+
+  const switchMode = (next: EntryMode) => {
+    if (next === mode) return;
+    setMode(next);
+    setDraft(null);
     setStatus("idle");
   };
 
   const step = (by: number) => {
-    const base = valid ? parsed : savedCount;
-    setDraft(String(clampCount(base + by)));
+    let base = 0;
+    if (isSetMode) {
+      base = valid ? parsed : savedCount;
+    } else {
+      base = valid ? parsed : 0;
+    }
+    const next = clampCount(base + by);
+    setDraft(next === 0 && !isSetMode ? "" : String(next));
     setStatus("idle");
   };
 
@@ -565,7 +692,7 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
     if (!canSave || activeDate === null) return;
 
     setStatus("saving");
-    const result = await saveDay(activeDate, parsed);
+    const result = await saveDay(activeDate, clampCount(targetCount));
     if (!result.success) {
       setStatus("error");
       return;
@@ -597,31 +724,30 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
     if (draft !== null && !valid)
       return (
         <span className="text-slate-500">
-          Enter a whole number from 0 to {MAX_COUNT}.
+          {isSetMode
+            ? `Enter a whole number from 0 to ${MAX_COUNT}.`
+            : `Enter an amount up to ${MAX_COUNT - savedCount}.`}
         </span>
       );
     if (draft !== null && delta !== 0)
       return (
-        <span className={delta > 0 ? "text-emerald-700" : "text-amber-700"}>
-          <span className="font-semibold" style={{ fontFamily: FONT_DATA }}>
-            {signed(delta)}
-          </span>{" "}
-          from {savedCount}
+        <span className="text-blue-600 font-medium">
+          Will be <span className="font-semibold">{targetCount}</span> (
+          {signed(delta)})
         </span>
       );
-    if (savedAdded !== 0)
-      return (
-        <span className="text-slate-500">
-          Added manually:{" "}
-          <span
-            className="font-semibold text-slate-700"
-            style={{ fontFamily: FONT_DATA }}
-          >
-            {signed(savedAdded)}
+    return (
+      <span>
+        Currently{" "}
+        <span className="font-semibold text-slate-800">{savedCount}</span> QC'd
+        today
+        {savedAdded !== 0 && (
+          <span className="ml-2 text-slate-400">
+            • {signed(savedAdded)} manually
           </span>
-        </span>
-      );
-    return null;
+        )}
+      </span>
+    );
   };
 
   return (
@@ -680,7 +806,7 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
       {open && (
         <div
           id="daily-tracker-body"
-          className="px-5 pb-5 pt-5 border-t border-slate-100"
+          className="px-5 pb-5 pt-4 border-t border-slate-100"
         >
           {!stats && loading && (
             <p className="text-sm text-slate-400">Loading…</p>
@@ -700,168 +826,183 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
           )}
 
           {stats && activeDate && (
-            <div className="grid gap-y-6 lg:grid-cols-[288px_minmax(0,1fr)] xl:grid-cols-[288px_minmax(0,1fr)_260px]">
-              {/* Editor */}
-              <form onSubmit={handleSave} className="lg:pr-6">
-                <div className="flex items-center gap-2 mb-3">
-                  <p className="text-sm font-semibold text-slate-800">
-                    {activeLabel}
-                  </p>
-                  {activeIsToday && (
-                    <span className="text-[11px] font-medium text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">
-                      Today
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => activeDate && setHistoryDate(activeDate)}
-                    title="See how this total was calculated"
-                    className="ml-auto cursor-pointer inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-50 px-2 py-1 rounded"
-                  >
-                    <History size={13} />
-                    History
-                  </button>
-                </div>
-
-                <label
-                  htmlFor="daily-tracker-count"
-                  className="block text-xs text-slate-500 mb-1.5"
-                >
-                  Footage QC'd
-                </label>
-                <div className="flex items-center gap-2">
-                  <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white focus-within:ring-2 focus-within:ring-blue-600/30 focus-within:border-blue-400">
+            <div className="flex flex-col gap-5">
+              {/* Top Row: Editor & Calendar */}
+              <div className="grid gap-6 lg:grid-cols-[minmax(280px,1fr)_minmax(0,2.5fr)] items-start">
+                {/* Left Column: Form */}
+                <div className="flex flex-col gap-3 lg:pr-6 lg:border-r lg:border-slate-100">
+                  {/* Editor Header */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <p className="text-[15px] font-semibold text-slate-900">
+                        {activeLabel}
+                      </p>
+                      {activeIsToday && (
+                        <span className="text-[11px] font-medium text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">
+                          Today
+                        </span>
+                      )}
+                    </div>
                     <button
                       type="button"
-                      onClick={() => step(-1)}
-                      disabled={valid ? parsed <= 0 : savedCount <= 0}
-                      aria-label="Decrease"
-                      className="cursor-pointer p-2.5 text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-l-lg disabled:opacity-30 disabled:hover:bg-transparent"
+                      onClick={() => activeDate && setHistoryDate(activeDate)}
+                      title="See how this total was calculated"
+                      className="cursor-pointer inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 transition-colors"
                     >
-                      <Minus size={14} />
-                    </button>
-                    <input
-                      id="daily-tracker-count"
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      max={MAX_COUNT}
-                      step={1}
-                      value={shown}
-                      onChange={(e) => {
-                        setDraft(e.target.value);
-                        setStatus("idle");
-                      }}
-                      className="w-14 py-2 text-center text-sm font-semibold text-slate-900 bg-transparent focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                      style={{ fontFamily: FONT_DATA }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => step(1)}
-                      disabled={valid ? parsed >= MAX_COUNT : false}
-                      aria-label="Increase"
-                      className="cursor-pointer p-2.5 text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-r-lg disabled:opacity-30 disabled:hover:bg-transparent"
-                    >
-                      <Plus size={14} />
+                      <History size={14} />
+                      History
                     </button>
                   </div>
 
-                  <button
-                    type="submit"
-                    disabled={!canSave}
-                    className="cursor-pointer px-4 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 active:bg-blue-800 transition-colors shadow-sm shadow-blue-600/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:bg-blue-600"
-                  >
-                    {status === "saving" ? "Saving…" : "Save"}
-                  </button>
+                  {/* Form Controls - Highly compact */}
+                  <form onSubmit={handleSave} className="flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Stepper */}
+                      <div className="flex items-center h-8 rounded-lg border border-slate-200 bg-white px-0.5">
+                        <button
+                          type="button"
+                          onClick={() => step(-1)}
+                          disabled={
+                            isSetMode ? parsed <= 0 : !draft || parsed <= 0
+                          }
+                          className="cursor-pointer p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-50 rounded disabled:opacity-30 disabled:hover:bg-transparent"
+                        >
+                          <Minus size={14} />
+                        </button>
+                        <input
+                          id="daily-tracker-count"
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          max={MAX_COUNT}
+                          value={shown}
+                          placeholder={isSetMode ? undefined : "0"}
+                          onChange={(e) => {
+                            setDraft(e.target.value);
+                            setStatus("idle");
+                          }}
+                          className="w-12 h-full text-center text-sm font-semibold text-slate-900 bg-transparent focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                          style={{ fontFamily: FONT_DATA }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => step(1)}
+                          disabled={
+                            isSetMode
+                              ? parsed >= MAX_COUNT
+                              : targetCount >= MAX_COUNT
+                          }
+                          className="cursor-pointer p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-50 rounded disabled:opacity-30 disabled:hover:bg-transparent"
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+
+                      <ModeToggle mode={mode} onChange={switchMode} />
+
+                      <button
+                        type="submit"
+                        disabled={!canSave}
+                        className="cursor-pointer px-4 h-8 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 active:bg-blue-800 transition-colors shadow-sm shadow-blue-600/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:bg-blue-600"
+                      >
+                        {status === "saving" ? "Saving…" : "Save"}
+                      </button>
+                    </div>
+
+                    {/* Status Text */}
+                    <p
+                      className="text-xs text-slate-500 min-h-[18px]"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      {renderStatus()}
+                    </p>
+                  </form>
                 </div>
 
-                <p
-                  className="min-h-5 mt-2 text-xs"
-                  role="status"
-                  aria-live="polite"
-                >
-                  {renderStatus()}
-                </p>
-              </form>
+                {/* Right Column: Calendar Grid */}
+                <div className="flex flex-col gap-2">
+                  <div className="grid grid-cols-7 gap-1.5">
+                    {visible.map((day) => {
+                      const date = parseDate(day.date);
+                      const isSelected = day.date === activeDate;
+                      const isToday = day.date === todayDate;
+                      const added = day.added ?? 0;
+                      const full = date.toLocaleDateString(undefined, {
+                        weekday: "long",
+                        month: "long",
+                        day: "numeric",
+                      });
+                      const label = isToday
+                        ? "Today"
+                        : `${date.toLocaleDateString(undefined, {
+                            weekday: "short",
+                          })} ${date.getDate()}`;
 
-              {/* Recent days */}
-              <div className="lg:border-l lg:border-slate-100 lg:px-6 flex flex-col justify-center">
-                <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
-                  {visible.map((day) => {
-                    const date = parseDate(day.date);
-                    const isSelected = day.date === activeDate;
-                    const isToday = day.date === todayDate;
-                    const added = day.added ?? 0;
-                    const full = date.toLocaleDateString(undefined, {
-                      weekday: "long",
-                      month: "long",
-                      day: "numeric",
-                    });
-                    const label = isToday
-                      ? "Today"
-                      : `${date.toLocaleDateString(undefined, {
-                          weekday: "short",
-                        })} ${date.getDate()}`;
-
-                    return (
-                      <button
-                        key={day.date}
-                        type="button"
-                        onClick={() => {
-                          selectDay(day.date);
-                          setHistoryDate(day.date);
-                        }}
-                        aria-pressed={isSelected}
-                        aria-label={`${full}: ${day.count} footage QC'd${
-                          added !== 0 ? `, ${signed(added)} added manually` : ""
-                        }`}
-                        title={full}
-                        className={`cursor-pointer flex flex-col gap-1.5 rounded-lg border px-2.5 py-2.5 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 ${
-                          isSelected
-                            ? "bg-blue-50 border-blue-300"
-                            : "bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300"
-                        }`}
-                      >
-                        <span
-                          className={`text-[11px] leading-none ${
-                            isToday
-                              ? "font-semibold text-blue-600"
-                              : "text-slate-400"
+                      return (
+                        <button
+                          key={day.date}
+                          type="button"
+                          onClick={() => {
+                            if (isSelected) {
+                              setHistoryDate(day.date);
+                            } else {
+                              selectDay(day.date);
+                            }
+                          }}
+                          aria-pressed={isSelected}
+                          aria-label={`${full}: ${day.count} footage QC'd${
+                            added !== 0
+                              ? `, ${signed(added)} added manually`
+                              : ""
+                          }`}
+                          title={full}
+                          className={`cursor-pointer flex flex-col gap-1.5 rounded-lg border px-2 py-2 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 ${
+                            isSelected
+                              ? "bg-blue-50 border-blue-300"
+                              : "bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300"
                           }`}
                         >
-                          {label}
-                        </span>
-                        <span className="flex items-center justify-between gap-1">
                           <span
-                            className={`text-lg leading-none font-semibold ${
-                              isSelected
-                                ? "text-blue-700"
-                                : day.count
-                                  ? "text-slate-800"
-                                  : "text-slate-300"
+                            className={`text-[11px] leading-none truncate ${
+                              isToday
+                                ? "font-semibold text-blue-600"
+                                : "text-slate-400"
                             }`}
-                            style={{ fontFamily: FONT_DATA }}
                           >
-                            {day.count || "–"}
+                            {label}
                           </span>
-                          <AddedBadge added={added} />
-                        </span>
-                      </button>
-                    );
-                  })}
+                          <span className="flex flex-wrap items-center justify-between gap-1 mt-auto">
+                            <span
+                              className={`text-base leading-none font-semibold ${
+                                isSelected
+                                  ? "text-blue-700"
+                                  : day.count
+                                    ? "text-slate-800"
+                                    : "text-slate-300"
+                              }`}
+                              style={{ fontFamily: FONT_DATA }}
+                            >
+                              {day.count || "–"}
+                            </span>
+                            <AddedBadge added={added} />
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {hasAdjustments && (
+                    <p className="text-[11px] text-slate-400">
+                      Badges show footage added or removed manually.
+                    </p>
+                  )}
                 </div>
-
-                {hasAdjustments && (
-                  <p className="mt-3 text-xs text-slate-400">
-                    Badges show footage added or removed manually.
-                  </p>
-                )}
               </div>
 
-              {/* Summary + view all */}
-              <div className="pt-5 border-t border-slate-100 lg:col-span-2 xl:col-span-1 xl:pt-0 xl:border-t-0 xl:border-l xl:pl-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between xl:flex-col xl:items-stretch xl:justify-center">
-                <dl className="flex flex-wrap gap-x-8 gap-y-2 text-sm xl:flex-col xl:flex-nowrap xl:gap-y-2.5">
-                  <div className="flex items-baseline justify-between gap-4">
+              {/* Bottom Row: Stats & View All */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-3 border-t border-slate-100">
+                <dl className="flex items-center gap-6 text-sm">
+                  <div className="flex items-center gap-2">
                     <dt className="text-slate-500">
                       Last {visible.length} days
                     </dt>
@@ -872,7 +1013,7 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
                       {rangeTotal}
                     </dd>
                   </div>
-                  <div className="flex items-baseline justify-between gap-4">
+                  <div className="flex items-center gap-2">
                     <dt className="text-slate-500">Avg per active day</dt>
                     <dd
                       className="font-semibold text-slate-900"
@@ -882,13 +1023,12 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
                     </dd>
                   </div>
                 </dl>
-
                 <button
                   type="button"
                   onClick={() => setHistoryOpen(true)}
-                  className="cursor-pointer inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40"
+                  className="cursor-pointer inline-flex items-center justify-center gap-2 px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40"
                 >
-                  <CalendarDays size={15} />
+                  <CalendarDays size={14} />
                   View all dates
                 </button>
               </div>

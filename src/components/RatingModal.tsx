@@ -1178,7 +1178,7 @@ export function RatingModal({
         } else if (e.code === "Digit4" || e.code === "Numpad4") {
           e.preventDefault();
           s.handlePresetScenario(
-            "Major Other Issue - a portion of the worker's face is visible to the camera more than 25% of the  time",
+            "Major Other Issue - a portion of the worker's face is visible to the camera more than 25% of the  time will be flagged",
           );
           return;
         }

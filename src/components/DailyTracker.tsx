@@ -732,8 +732,8 @@ export function DailyTracker({ days = 14, tz, refreshKey }: DailyTrackerProps) {
     if (draft !== null && delta !== 0)
       return (
         <span className="text-blue-600 font-medium">
-          Will be <span className="font-semibold">{targetCount}</span> (
-          {signed(delta)})
+          {savedCount} ({signed(delta)}) ={" "}
+          <span className="font-semibold">{targetCount}</span>
         </span>
       );
     return (
